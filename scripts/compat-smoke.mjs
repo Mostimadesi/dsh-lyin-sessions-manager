@@ -32,7 +32,8 @@ if (!RUNTIME || RUNTIME.startsWith('-')) {
 }
 
 // 与 src/index.js 的 inject 列表保持一致（外加 plugin get() 需要的 'sessions'）。
-const HOST_INJECT = ['webServer', 'workspaceRegistry', 'sessionPersistence', 'sessionQuery', 'storageDomain']
+// v0.1：api-auth.js 认证门要求 connection 服务（owner-only、fail-closed）。
+const HOST_INJECT = ['webServer', 'workspaceRegistry', 'sessionPersistence', 'sessionQuery', 'storageDomain', 'connection']
 const PKG_OF = {
   webServer: '@deepseek-ai/dsh-host-webserver',
   workspaceRegistry: '@deepseek-ai/dsh-workspace',
@@ -43,10 +44,14 @@ const PKG_OF = {
 // cordis 是独立 peer，不在 dsh 的 dependencies 里也能解析到最新版。
 const PEER_PACKAGES = ['@deepseek-ai/cordis', ...HOST_INJECT.map((n) => PKG_OF[n])]
 
+// Windows 下 npm 是 npm.cmd，spawnSync 不走 shell 解析不到。
+const NPM_BIN = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+
 function npm(...args) {
   // 强制官方 registry：本地 .npmrc 常配 npmmirror 镜像，新发布的 alpha/rc 版本镜像可能查不到。
-  return execFileSync('npm', ['--registry', 'https://registry.npmjs.org', ...args],
-    { encoding: 'utf8', cwd: REPO_ROOT, maxBuffer: 16 << 20 })
+  // win32 走 shell：Node ≥18.20 拒绝无 shell 直接执行 .cmd（EINVAL）。
+  return execFileSync(NPM_BIN, ['--registry', 'https://registry.npmjs.org', ...args],
+    { encoding: 'utf8', cwd: REPO_ROOT, maxBuffer: 16 << 20, shell: process.platform === 'win32' })
 }
 
 function step(msg) { console.log(`\n→ ${msg}`) }
@@ -72,8 +77,8 @@ const tmp = await mkdtemp(join(tmpdir(), 'dsm-compat-'))
 let ok = false
 try {
   step(`真实安装 ${installs.length} 个包 → ${tmp}`)
-  execFileSync('npm', ['install', '--prefix', tmp, '--no-audit', '--no-fund', '--ignore-scripts',
-    '--no-save', ...installs], { encoding: 'utf8', cwd: tmp, maxBuffer: 32 << 20, stdio: ['ignore', 'pipe', 'inherit'] })
+  execFileSync(NPM_BIN, ['install', '--prefix', tmp, '--no-audit', '--no-fund', '--ignore-scripts',
+    '--no-save', ...installs], { encoding: 'utf8', cwd: tmp, maxBuffer: 32 << 20, stdio: ['ignore', 'pipe', 'inherit'], shell: process.platform === 'win32' })
 
   // ---- 3. 真实 cordis apply 插件 ----------------------------------------
   step('用真实 cordis 应用插件（DI 契约冒烟）')
@@ -96,6 +101,8 @@ try {
     },
     storageDomain: { get: () => ({ global: { get: () => domainState, set: async () => {} } }) },
     webServer: { register: (route) => { routes.set(route.path, route.handler); return () => {} } },
+    // v0.1 认证门：owner 冒烟身份。门本身的拒绝矩阵在 tests/api-auth.test.js。
+    connection: { admit: () => ({ peer: { principal: { kind: 'owner' } } }) },
     get: (name) => name === 'sessions' ? { get: () => null, list: () => [], flush: async () => true, store: new Map() } : null,
     effect: (fn) => fn(),
   }
@@ -111,6 +118,12 @@ try {
     if (!routes.has(path)) throw new Error(`路由未注册: ${path}（cordis DI 契约可能已破坏）`)
   }
   console.log(`    ✓ ${routes.size} 条 /archived-sessions/* 路由全部注册成功`)
+
+  // v0.1：认证门放行 owner 请求（用 capabilities 路由做最小冒烟）。
+  const fakeRes = { status: 0, writeHead(code) { this.status = code }, end() {} }
+  await routes.get('/archived-sessions/capabilities')({}, fakeRes)
+  if (fakeRes.status !== 200) throw new Error(`认证门误拦 owner 冒烟请求（capabilities 返回 ${fakeRes.status}）`)
+  console.log('    ✓ 认证门放行 owner 冒烟请求（capabilities → 200）')
   ok = true
 } finally {
   await rm(tmp, { recursive: true, force: true })
