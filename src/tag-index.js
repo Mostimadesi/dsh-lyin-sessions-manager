@@ -19,12 +19,13 @@ import { join } from 'node:path'
 // copied between them.
 export const TAG_SCHEMA_VERSION = 4
 
-// Caps (plan §1.3): ≤200 tag definitions globally, ≤10 tags per session,
-// ≤24 code points per name. Array.from counting means one Chinese character
-// (or one surrogate pair) counts as exactly 1, so the limit is honest for CJK.
+// Caps: ≤200 tag definitions globally, ≤20 tags per session (v0.1 对齐
+// hkkz9522 的 20/会话), ≤32 code points per name (v0.1 由 24 放宽对齐).
+// Array.from counting means one Chinese character (or one surrogate pair)
+// counts as exactly 1, so the limit is honest for CJK.
 export const MAX_TAGS = 200
-export const MAX_TAGS_PER_SESSION = 10
-export const MAX_TAG_NAME = 24
+export const MAX_TAGS_PER_SESSION = 20
+export const MAX_TAG_NAME = 32
 
 // Same state directory (and same env override) as the star index: all
 // plugin-owned user marks live together in ~/.dsh/sessions-manager.

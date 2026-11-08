@@ -10,6 +10,7 @@ import { existsSync } from 'node:fs'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { MAX_TAGS_PER_SESSION, MAX_TAG_NAME } from '../src/tag-index.js'
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -157,7 +158,7 @@ test('tags routes carry stable error codes (400/404/409)', async () => {
     let r = await b.call('/archived-sessions/tags/create', { name: '   ' })
     assert.equal(r.status, 400)
     assert.equal(r.body.code, 'DSM_TAG_NAME_INVALID')
-    r = await b.call('/archived-sessions/tags/create', { name: 'x'.repeat(25) })
+    r = await b.call('/archived-sessions/tags/create', { name: 'x'.repeat(MAX_TAG_NAME + 1) })
     assert.equal(r.status, 400)
     assert.equal(r.body.code, 'DSM_TAG_NAME_INVALID')
 
@@ -177,7 +178,7 @@ test('tags routes carry stable error codes (400/404/409)', async () => {
     assert.equal(r.status, 404)
     assert.equal(r.body.code, 'DSM_TAG_NOT_FOUND')
 
-    // set：会话 id 走 isSafeSessionId；未知 tagId → 400；单会话 >10 → 409
+    // set：会话 id 走 isSafeSessionId；未知 tagId → 400；单会话 >MAX_TAGS_PER_SESSION → 409
     r = await b.call('/archived-sessions/tags/set', { sessionId: '../escape', tagIds: [a.id] })
     assert.equal(r.status, 400)
     assert.equal(r.body.code, 'DSM_TAG_SESSION_INVALID')
@@ -188,8 +189,8 @@ test('tags routes carry stable error codes (400/404/409)', async () => {
     assert.equal(r.status, 400)
     assert.equal(r.body.code, 'DSM_TAG_IDS_INVALID')
     const extra = [a.id, z.id]
-    for (let i = 0; i < 9; i++) extra.push((await b.call('/archived-sessions/tags/create', { name: `x-${i}` })).body.tag.id)
-    r = await b.call('/archived-sessions/tags/set', { sessionId: 's1', tagIds: extra }) // 11 > 10
+    for (let i = 0; i < MAX_TAGS_PER_SESSION - 1; i++) extra.push((await b.call('/archived-sessions/tags/create', { name: `x-${i}` })).body.tag.id)
+    r = await b.call('/archived-sessions/tags/set', { sessionId: 's1', tagIds: extra }) // 2+19=21 > 20
     assert.equal(r.status, 409)
     assert.equal(r.body.code, 'DSM_TAG_LIMIT')
   } finally { await cleanup(b) }

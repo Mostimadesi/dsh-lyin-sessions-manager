@@ -15,6 +15,7 @@ import {
   TAG_SCHEMA_VERSION,
   MAX_TAGS,
   MAX_TAGS_PER_SESSION,
+  MAX_TAG_NAME,
 } from '../src/tag-index.js'
 
 async function tempIndex() {
@@ -39,7 +40,7 @@ test('normalizeTagStore drops dirty tag entries but keeps the healthy ones', () 
       { id: 42, name: '数字 id', createdAt: 7 },     // 非字符串 id → 丢
       { id: 't/../evil', name: '路径 id', createdAt: 8 },
       { id: 't_a2', name: '  ', createdAt: 9 },      // 空白名 → 丢
-      { id: 't_a3', name: 'x'.repeat(25), createdAt: 10 }, // 超长名（>24 码点）→ 丢
+      { id: 't_a3', name: 'x'.repeat(MAX_TAG_NAME + 1), createdAt: 10 }, // 超长名（>MAX_TAG_NAME 码点）→ 丢
       { id: 't_a4', name: '重要', createdAt: 11 },   // casefold 同名 → 丢
       { id: 't_a5', name: '待办', createdAt: 12 },
       null,
@@ -53,10 +54,10 @@ test('normalizeTagStore drops dirty tag entries but keeps the healthy ones', () 
 })
 
 test('normalizeTagStore trims names and counts code points, not UTF-16 units', () => {
-  // 24 码点（代理对按 1 字符）恰好合法；25 码点非法。
-  const ok = '😀'.repeat(24)
+  // MAX_TAG_NAME 码点（代理对按 1 字符）恰好合法；MAX_TAG_NAME+1 码点非法。
+  const ok = '😀'.repeat(MAX_TAG_NAME)
   assert.equal(normalizeTagName(`  ${ok}  `), ok)
-  assert.equal(normalizeTagName('😀'.repeat(25)), null)
+  assert.equal(normalizeTagName('😀'.repeat(MAX_TAG_NAME + 1)), null)
   assert.equal(normalizeTagName('a/b'), null)
   assert.equal(normalizeTagName('a\u0000b'), null)
 })
@@ -105,7 +106,7 @@ test('create rejects duplicates casefold-insensitively, and caps globally', asyn
   await index.create('Alpha')
   await assert.rejects(() => index.create('  alpha '), (e) => e.status === 409 && e.code === 'DSM_TAG_EXISTS')
   await assert.rejects(() => index.create(''), (e) => e.status === 400 && e.code === 'DSM_TAG_NAME_INVALID')
-  await assert.rejects(() => index.create('x'.repeat(25)), (e) => e.status === 400 && e.code === 'DSM_TAG_NAME_INVALID')
+  await assert.rejects(() => index.create('x'.repeat(MAX_TAG_NAME + 1)), (e) => e.status === 400 && e.code === 'DSM_TAG_NAME_INVALID')
   for (let i = 0; i < MAX_TAGS - 1; i++) await index.create(`tag-${i}`)
   await assert.rejects(() => index.create('one too many'), (e) => e.status === 409 && e.code === 'DSM_TAG_LIMIT')
   assert.equal((await index.read()).tags.length, MAX_TAGS)

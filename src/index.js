@@ -15,6 +15,8 @@ import { rewriteFrame0CwdInMemory, scanZstdFrames } from './zstd-frame.js'
 import { createSessionMarkdownBuilder } from './markdown.js'
 import { createStarIndex } from './star-index.js'
 import { createTagIndex } from './tag-index.js'
+import { createSessionMetaIndex } from './session-meta-index.js'
+import { createApiAuth } from './api-auth.js'
 import { createSavedFilters } from './saved-filters.js'
 import { createPendingMoveStore } from './pending-moves.js'
 import { createMoveNoticeStore } from './move-notices.js'
@@ -38,7 +40,7 @@ const BUILD_STAMP = typeof __BUILD_STAMP__ !== 'undefined' ? __BUILD_STAMP__ : '
 
 
 export const name = 'dsh-lyin-sessions-manager'
-export const inject = ['webServer', 'workspaceRegistry', 'sessionPersistence', 'sessionQuery', 'storageDomain']
+export const inject = ['webServer', 'workspaceRegistry', 'sessionPersistence', 'sessionQuery', 'storageDomain', 'connection']
 
 const MAX_TITLE = 80
 // 插件自有状态目录（星标 / 标签 / 保存筛选 / 自动归档 / 标题索引共用）。与 star-index.js、
@@ -629,6 +631,9 @@ export function apply(ctx) {
   // 标签（3.7.0，schema v4）：与星标同型、同状态目录（tags.json）。纯用户元数据，
   // rename/merge/delete 只重写标签文档，永不触碰会话本体（方案 §1.3 红线）。
   const tags = createTagIndex()
+  // 会话元数据（v0.1，schema meta-v1，session-meta.json）：优先级 1-5 / 备注 ≤2000
+  // / 待回看。与星标同型同状态目录；纯用户元数据，永不触碰会话本体。
+  const meta = createSessionMetaIndex()
   // 保存的筛选（schema v1，saved-filters.json）：filters 为不透明 JSON，host
   // 只限条数/名称/序列化体积，绝不解析其内容。
   const savedFilters = createSavedFilters()
@@ -661,6 +666,16 @@ export function apply(ctx) {
       const valid = new Set(validIds.map(String))
       const gone = Object.keys(store.assignments).filter((id) => !valid.has(id))
       if (gone.length) await tags.removeIds(gone)
+    } catch (e) { /* best-effort */ }
+  }
+
+  // 元数据的会话侧条目同样要 GC：与 gcStars/gcTags 同挂点、同信任条件。
+  async function gcMeta(validIds) {
+    try {
+      const store = await meta.read()
+      const valid = new Set(validIds.map(String))
+      const gone = Object.keys(store.entries).filter((id) => !valid.has(id))
+      if (gone.length) await meta.removeIds(gone)
     } catch (e) { /* best-effort */ }
   }
 
@@ -1647,12 +1662,22 @@ export function apply(ctx) {
         if (kept.length) tagIdsBySession.set(sid, kept)
       }
     } catch (e) {}
+    // Same one-shot read as stars/tags: meta is plain user metadata, no decoding.
+    let metaEntries = {}
+    try { metaEntries = (await meta.read()).entries || {} } catch (e) {}
     for (const it of items) {
       it.starred = starredSet.has(String(it.sessionId))
       it.tags = tagIdsBySession.get(String(it.sessionId)) || []
+      // v0.1 元数据三字段：priority 未设置时以 null 出线（客户端 ?? 3 归一渲染），
+      // note 未设置为 ''，review 未设置为 false——字段恒存在，客户端免判型。
+      const m = metaEntries[String(it.sessionId)] || {}
+      it.priority = Number.isInteger(m.priority) ? m.priority : null
+      it.note = typeof m.note === 'string' ? m.note : ''
+      it.review = m.review === true
     }
     if (headersOk) await gcStars(ids)
     if (headersOk) await gcTags(ids)
+    if (headersOk) await gcMeta(ids)
     return { items, usage }
   }
 
@@ -2064,23 +2089,29 @@ export function apply(ctx) {
   ctx.effect(() => {
     const disposers = []
 
+    // 认证门（v0.1）：所有 /archived-sessions/* 路由统一 owner-only、fail-closed
+    // （connection 服务缺失→503，admit 拒绝→401/403，非 owner→403）。
+    // 逃生开关 DSH_SESSIONS_MANAGER_NO_AUTH=1 仅供测试/应急，需在宿主启动前设置。
+    const apiAuth = createApiAuth(ctx)
+    const registerRoute = (opts) => disposers.push(ctx.webServer.register({ ...opts, handler: apiAuth.wrap(opts.handler) }))
+
     if (typeof ctx.on === 'function') disposers.push(ctx.on('session/event', (session, event) => {
       if (event && event.type === 'session/title' && event.data && typeof event.data.title === 'string') {
         authorityTitleCache.set(String(session.id), event.data.title)
       }
     }))
 
-    disposers.push(ctx.webServer.register({
+    registerRoute({
       kind: 'exact',
       path: '/archived-sessions/capabilities',
       handler: async (req, res) => json(res, { ...capabilities, buildStamp: BUILD_STAMP }),
-    }))
+    })
 
     // 活跃会话心跳（客户端 → host）。0.1.7+ 起 host 无从得知 UI 当前选中了哪个
     // 会话（见 src/active-session.js），只能由客户端上报；host 只在心跳新鲜期内
     // 采信，用它拦住「移动正在看的会话」和「自动归档正在看的会话」。
     // body: { clientId, sessionId|null }。sessionId 为空 = 该客户端当前无活跃会话。
-    disposers.push(ctx.webServer.register({
+    registerRoute({
       kind: 'exact',
       path: '/archived-sessions/active-session',
       handler: async (req, res) => {
@@ -2093,9 +2124,9 @@ export function apply(ctx) {
           activeSessionIds: [...activeTracker.activeIds()],
         })
       },
-    }))
+    })
 
-    disposers.push(ctx.webServer.register({
+    registerRoute({
       kind: 'exact',
       path: '/archived-sessions/list',
       handler: async (req, res) => {
@@ -2134,9 +2165,9 @@ export function apply(ctx) {
           json(res, { error: String((e && e.message) || e) }, 500)
         }
       },
-    }))
+    })
 
-    disposers.push(ctx.webServer.register({
+    registerRoute({
       kind: 'exact',
       path: '/archived-sessions/restore',
       handler: async (req, res) => {
@@ -2149,9 +2180,9 @@ export function apply(ctx) {
           json(res, { ok: false, error: String((e && e.message) || e) }, errorStatus(e))
         }
       },
-    }))
+    })
 
-    disposers.push(ctx.webServer.register({
+    registerRoute({
       kind: 'exact',
       path: '/archived-sessions/restore-many',
       handler: async (req, res) => {
@@ -2169,9 +2200,9 @@ export function apply(ctx) {
           json(res, { ok: false, code: e && e.code, error: String((e && e.message) || e) }, errorStatus(e))
         }
       },
-    }))
+    })
 
-    disposers.push(ctx.webServer.register({
+    registerRoute({
       kind: 'exact',
       path: '/archived-sessions/delete',
       handler: async (req, res) => {
@@ -2190,9 +2221,9 @@ export function apply(ctx) {
           json(res, { ok: false, error: String((e && e.message) || e) }, errorStatus(e))
         }
       },
-    }))
+    })
 
-    disposers.push(ctx.webServer.register({
+    registerRoute({
       kind: 'exact',
       path: '/archived-sessions/delete-many',
       handler: async (req, res) => {
@@ -2223,10 +2254,10 @@ export function apply(ctx) {
           json(res, { ok: false, code: e && e.code, error: String((e && e.message) || e) }, errorStatus(e))
         }
       },
-    }))
+    })
 
     // ---- Recycle bin (回收站) routes ----------------------------------------
-    disposers.push(ctx.webServer.register({
+    registerRoute({
       kind: 'exact',
       path: '/archived-sessions/trash/list',
       handler: async (req, res) => {
@@ -2240,9 +2271,9 @@ export function apply(ctx) {
           json(res, { ok: false, error: String((e && e.message) || e) }, errorStatus(e))
         }
       },
-    }))
+    })
 
-    disposers.push(ctx.webServer.register({
+    registerRoute({
       kind: 'exact',
       path: '/archived-sessions/trash/settings',
       handler: async (req, res) => {
@@ -2256,9 +2287,9 @@ export function apply(ctx) {
           json(res, { ok: false, error: String((e && e.message) || e) }, errorStatus(e))
         }
       },
-    }))
+    })
 
-    disposers.push(ctx.webServer.register({
+    registerRoute({
       kind: 'exact',
       path: '/archived-sessions/trash/verify',
       handler: async (req, res) => {
@@ -2282,9 +2313,9 @@ export function apply(ctx) {
           json(res, { ok: false, error: String((e && e.message) || e) }, errorStatus(e))
         }
       },
-    }))
+    })
 
-    disposers.push(ctx.webServer.register({
+    registerRoute({
       kind: 'exact',
       path: '/archived-sessions/trash/restore',
       handler: async (req, res) => {
@@ -2301,9 +2332,9 @@ export function apply(ctx) {
           json(res, { ok: false, code: e && e.code, error: String((e && e.message) || e) }, errorStatus(e))
         }
       },
-    }))
+    })
 
-    disposers.push(ctx.webServer.register({
+    registerRoute({
       kind: 'exact',
       path: '/archived-sessions/trash/purge',
       handler: async (req, res) => {
@@ -2328,9 +2359,9 @@ export function apply(ctx) {
           json(res, { ok: false, code: e && e.code, error: String((e && e.message) || e) }, errorStatus(e))
         }
       },
-    }))
+    })
 
-    disposers.push(ctx.webServer.register({
+    registerRoute({
       kind: 'exact',
       path: '/archived-sessions/trash/purge-many',
       handler: async (req, res) => {
@@ -2359,10 +2390,10 @@ export function apply(ctx) {
           json(res, { ok: false, code: e && e.code, error: String((e && e.message) || e) }, errorStatus(e))
         }
       },
-    }))
+    })
 
     // All conversations (for the "移动会话" panel).
-    disposers.push(ctx.webServer.register({
+    registerRoute({
       kind: 'exact',
       path: '/archived-sessions/sessions',
       handler: async (req, res) => {
@@ -2375,10 +2406,10 @@ export function apply(ctx) {
           json(res, { error: String((e && e.message) || e) }, 500)
         }
       },
-    }))
+    })
 
     // Star / unstar one or many sessions (收藏, schema v3).
-    disposers.push(ctx.webServer.register({
+    registerRoute({
       kind: 'exact',
       path: '/archived-sessions/star/set',
       handler: async (req, res) => {
@@ -2398,11 +2429,11 @@ export function apply(ctx) {
           json(res, { ok: false, code: e && e.code, error: String((e && e.message) || e) }, errorStatus(e))
         }
       },
-    }))
+    })
 
     // ---- Tags (标签, schema v4) — one route one action, same shape as star/set.
     // Pure user metadata: these routes never create/modify/delete a session.
-    disposers.push(ctx.webServer.register({
+    registerRoute({
       kind: 'exact',
       path: '/archived-sessions/tags/list',
       handler: async (req, res) => {
@@ -2413,9 +2444,9 @@ export function apply(ctx) {
           json(res, { ok: false, code: e && e.code, error: String((e && e.message) || e) }, errorStatus(e))
         }
       },
-    }))
+    })
 
-    disposers.push(ctx.webServer.register({
+    registerRoute({
       kind: 'exact',
       path: '/archived-sessions/tags/create',
       handler: async (req, res) => {
@@ -2427,9 +2458,9 @@ export function apply(ctx) {
           json(res, { ok: false, code: e && e.code, error: String((e && e.message) || e) }, errorStatus(e))
         }
       },
-    }))
+    })
 
-    disposers.push(ctx.webServer.register({
+    registerRoute({
       kind: 'exact',
       path: '/archived-sessions/tags/rename',
       handler: async (req, res) => {
@@ -2441,9 +2472,9 @@ export function apply(ctx) {
           json(res, { ok: false, code: e && e.code, error: String((e && e.message) || e) }, errorStatus(e))
         }
       },
-    }))
+    })
 
-    disposers.push(ctx.webServer.register({
+    registerRoute({
       kind: 'exact',
       path: '/archived-sessions/tags/merge',
       handler: async (req, res) => {
@@ -2455,9 +2486,9 @@ export function apply(ctx) {
           json(res, { ok: false, code: e && e.code, error: String((e && e.message) || e) }, errorStatus(e))
         }
       },
-    }))
+    })
 
-    disposers.push(ctx.webServer.register({
+    registerRoute({
       kind: 'exact',
       path: '/archived-sessions/tags/delete',
       handler: async (req, res) => {
@@ -2469,9 +2500,9 @@ export function apply(ctx) {
           json(res, { ok: false, code: e && e.code, error: String((e && e.message) || e) }, errorStatus(e))
         }
       },
-    }))
+    })
 
-    disposers.push(ctx.webServer.register({
+    registerRoute({
       kind: 'exact',
       path: '/archived-sessions/tags/set',
       handler: async (req, res) => {
@@ -2487,10 +2518,33 @@ export function apply(ctx) {
           json(res, { ok: false, code: e && e.code, error: String((e && e.message) || e) }, errorStatus(e))
         }
       },
-    }))
+    })
+
+    // ---- Session meta (优先级/备注/待回看, schema meta-v1) — same shape as star/set.
+    // Pure user metadata: this route never creates/modifies/deletes a session.
+    // body: { sessionId? | sessionIds?, patch: { priority?, note?, review? } }
+    // patch 语义：省略的键 = 保持不变；priority:null / note:'' / review:false = 清除。
+    registerRoute({
+      kind: 'exact',
+      path: '/archived-sessions/meta/set',
+      handler: async (req, res) => {
+        try {
+          const body = await readJsonBody(req)
+          let ids = parseIds(body)
+          if ((!ids || ids.length === 0) && body && typeof body.sessionId === 'string') {
+            ids = isSafeSessionId(body.sessionId) ? [body.sessionId] : null
+          }
+          if (!ids || ids.length === 0) return json(res, { ok: false, code: 'DSM_META_SESSION_INVALID', error: 'missing sessionId' }, 400)
+          const result = await meta.setMeta(ids, body && body.patch)
+          json(res, { ok: true, updated: result.updated })
+        } catch (e) {
+          json(res, { ok: false, code: e && e.code, error: String((e && e.message) || e) }, errorStatus(e))
+        }
+      },
+    })
 
     // ---- Saved filters (保存筛选, schema v1) --------------------------------
-    disposers.push(ctx.webServer.register({
+    registerRoute({
       kind: 'exact',
       path: '/archived-sessions/filters/list',
       handler: async (req, res) => {
@@ -2500,9 +2554,9 @@ export function apply(ctx) {
           json(res, { ok: false, code: e && e.code, error: String((e && e.message) || e) }, errorStatus(e))
         }
       },
-    }))
+    })
 
-    disposers.push(ctx.webServer.register({
+    registerRoute({
       kind: 'exact',
       path: '/archived-sessions/filters/save',
       handler: async (req, res) => {
@@ -2514,9 +2568,9 @@ export function apply(ctx) {
           json(res, { ok: false, code: e && e.code, error: String((e && e.message) || e) }, errorStatus(e))
         }
       },
-    }))
+    })
 
-    disposers.push(ctx.webServer.register({
+    registerRoute({
       kind: 'exact',
       path: '/archived-sessions/filters/delete',
       handler: async (req, res) => {
@@ -2530,7 +2584,7 @@ export function apply(ctx) {
           json(res, { ok: false, code: e && e.code, error: String((e && e.message) || e) }, errorStatus(e))
         }
       },
-    }))
+    })
 
     // Human-readable Markdown export (one session). Raw-log ZIP export is
     // dsh's own GET /api/session.export — we deliberately do not duplicate it
@@ -2540,7 +2594,7 @@ export function apply(ctx) {
     // offset/length 有界切片），流式渲染 Markdown，客户端断开即取消（signal），
     // 并受全局并发闸约束——大日志不再一次性整本驻留内存。
     const exportLimiter = createLimiter(2)
-    disposers.push(ctx.webServer.register({
+    registerRoute({
       kind: 'exact',
       path: '/archived-sessions/export-md',
       handler: async (req, res) => {
@@ -2574,9 +2628,9 @@ export function apply(ctx) {
           json(res, { error: String((e && e.message) || e) }, errorStatus(e))
         }
       },
-    }))
+    })
 
-    disposers.push(ctx.webServer.register({
+    registerRoute({
       kind: 'exact',
       path: '/archived-sessions/sidebar-state',
       handler: async (req, res) => {
@@ -2586,7 +2640,7 @@ export function apply(ctx) {
           json(res, { error: String((e && e.message) || e) }, errorStatus(e))
         }
       },
-    }))
+    })
 
     // 子代理血缘树（管理视图数据面）：给定父会话，返回 origin==='subagent'
     // 的递归子树。DSH 原生目录（ui-subagent）只读，这里补管理能力的数据来源。
@@ -2594,7 +2648,7 @@ export function apply(ctx) {
     // 标题走 v3.6.2 的纯缓存读取（metaCache/持久索引/权威缓存），未命中入后台
     // 预热、本轮返回 null；请求路径零解码。
     // live 标记 = 会话在内存里活着（正在运行或已打开）：批量清理必须跳过。
-    disposers.push(ctx.webServer.register({
+    registerRoute({
       kind: 'exact',
       path: '/archived-sessions/lineage-tree',
       handler: async (req, res) => {
@@ -2719,10 +2773,10 @@ export function apply(ctx) {
           json(res, { error: String((e && e.message) || e) }, errorStatus(e))
         }
       },
-    }))
+    })
 
     // Available target workspaces (for the move picker).
-    disposers.push(ctx.webServer.register({
+    registerRoute({
       kind: 'exact',
       path: '/archived-sessions/workspaces',
       handler: async (req, res) => {
@@ -2732,10 +2786,10 @@ export function apply(ctx) {
           json(res, { error: String((e && e.message) || e) }, 500)
         }
       },
-    }))
+    })
 
     // Move one conversation to a target workspace (existing path or a new one).
-    disposers.push(ctx.webServer.register({
+    registerRoute({
       kind: 'exact',
       path: '/archived-sessions/move',
       handler: async (req, res) => {
@@ -2761,12 +2815,12 @@ export function apply(ctx) {
           json(res, { ok: false, code: e && e.code, error: String((e && e.message) || e) }, errorStatus(e))
         }
       },
-    }))
+    })
 
     // Move many conversations to one target workspace (issue #7). Sequential
     // on purpose: each move rewrites frame0 (file IO), and one bad session
     // must not block the rest. Single reindex at the end covers all moves.
-    disposers.push(ctx.webServer.register({
+    registerRoute({
       kind: 'exact',
       path: '/archived-sessions/move-many',
       handler: async (req, res) => {
@@ -2803,10 +2857,10 @@ export function apply(ctx) {
           json(res, { ok: false, code: e && e.code, error: String((e && e.message) || e) }, errorStatus(e))
         }
       },
-    }))
+    })
 
     // 待移动队列：查看 / 取消（会话被占用时排队，释放后自动完成）。
-    disposers.push(ctx.webServer.register({
+    registerRoute({
       kind: 'exact',
       path: '/archived-sessions/pending-moves',
       handler: async (req, res) => {
@@ -2817,8 +2871,8 @@ export function apply(ctx) {
           json(res, { error: String((e && e.message) || e) }, 500)
         }
       },
-    }))
-    disposers.push(ctx.webServer.register({
+    })
+    registerRoute({
       kind: 'exact',
       path: '/archived-sessions/pending-moves/cancel',
       handler: async (req, res) => {
@@ -2832,11 +2886,11 @@ export function apply(ctx) {
           json(res, { ok: false, error: String((e && e.message) || e) }, errorStatus(e))
         }
       },
-    }))
+    })
 
     // T2：ack 已展示的排队移动通知（尽力清理；失败无害，client 端 localStorage
     // 已见集合负责多 tab 去重，7 天 TTL 兜底）。
-    disposers.push(ctx.webServer.register({
+    registerRoute({
       kind: 'exact',
       path: '/archived-sessions/pending-moves/notices/ack',
       handler: async (req, res) => {
@@ -2850,10 +2904,10 @@ export function apply(ctx) {
           json(res, { ok: false, error: String((e && e.message) || e) }, errorStatus(e))
         }
       },
-    }))
+    })
 
     // Archive (hide) one session.
-    disposers.push(ctx.webServer.register({
+    registerRoute({
       kind: 'exact',
       path: '/archived-sessions/archive',
       handler: async (req, res) => {
@@ -2866,10 +2920,10 @@ export function apply(ctx) {
           json(res, { ok: false, error: String((e && e.message) || e) }, 500)
         }
       },
-    }))
+    })
 
     // Archive (hide) many sessions.
-    disposers.push(ctx.webServer.register({
+    registerRoute({
       kind: 'exact',
       path: '/archived-sessions/archive-many',
       handler: async (req, res) => {
@@ -2887,11 +2941,11 @@ export function apply(ctx) {
           json(res, { ok: false, error: String((e && e.message) || e) }, 500)
         }
       },
-    }))
+    })
 
     // Per-session details (v2.0): disk usage, turn/step/message counts, tool
     // usage, fetch records, write/edit files, and lineage.
-    disposers.push(ctx.webServer.register({
+    registerRoute({
       kind: 'exact',
       path: '/archived-sessions/details',
       handler: async (req, res) => {
@@ -2907,10 +2961,10 @@ export function apply(ctx) {
           json(res, { error: String((e && e.message) || e) }, (e && e.status) ? e.status : 500)
         }
       },
-    }))
+    })
 
     // Storage usage rollup (read-only): per-workspace totals + largest sessions.
-    disposers.push(ctx.webServer.register({
+    registerRoute({
       kind: 'exact',
       path: '/archived-sessions/storage',
       handler: async (req, res) => {
@@ -2921,7 +2975,7 @@ export function apply(ctx) {
           json(res, { error: String((e && e.message) || e) }, 500)
         }
       },
-    }))
+    })
 
     // Auto-archive settings. A plain read (no patch keys) doubles as the lazy
     // sweep trigger — that is how the once-a-day cleanup gets a chance to run
@@ -2929,7 +2983,7 @@ export function apply(ctx) {
     // the panel never waits on it (P5, issue #1): the sweep itself already
     // reuses the metadata caches, and this keeps the settings read latency
     // independent of library size.
-    disposers.push(ctx.webServer.register({
+    registerRoute({
       kind: 'exact',
       path: '/archived-sessions/auto-archive/settings',
       handler: async (req, res) => {
@@ -2964,10 +3018,10 @@ export function apply(ctx) {
           json(res, { ok: false, error: String((e && e.message) || e) }, errorStatus(e))
         }
       },
-    }))
+    })
 
     // Run the auto-archive sweep right now, ignoring the once-a-day throttle.
-    disposers.push(ctx.webServer.register({
+    registerRoute({
       kind: 'exact',
       path: '/archived-sessions/auto-archive/run',
       handler: async (req, res) => {
@@ -2979,7 +3033,7 @@ export function apply(ctx) {
           json(res, { ok: false, error: String((e && e.message) || e) }, 500)
         }
       },
-    }))
+    })
 
     return () => { for (const d of disposers) d() }
   }, 'dsh-lyin-sessions-manager: routes')
