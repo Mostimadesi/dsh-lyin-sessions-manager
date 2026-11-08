@@ -523,10 +523,10 @@ function SessionPanel({ workspacesSvc }) {
   // v0.1 批量标注 sheet（优先级 / 待回看）：与批量移动 sheet 同型。
   const [batchMetaOpen, setBatchMetaOpen] = useState(false)
   const [batchPrio, setBatchPrio] = useState('')
-  // 详情面板的备注草稿：noteDraftFor 记录草稿属于哪个会话；null = 无草稿
-  // （textarea 直接显示 it.note）。保存成功后草稿复位，回落到乐观更新后的 note。
-  const [noteDraft, setNoteDraft] = useState('')
-  const [noteDraftFor, setNoteDraftFor] = useState(null)
+  // 详情面板的备注草稿：按 sessionId 隔离（Map 形状 {sessionId: text}）——切换到
+  // 另一个会话的详情不会丢掉前一个的未保存草稿（复核建议 5）。保存成功后删除
+  // 该键，textarea 回落到乐观更新后的 it.note；纯内存态，随面板卸载重置。
+  const [noteDrafts, setNoteDrafts] = useState({})
   const [busy, setBusy] = useState(null)
   const [openMove, setOpenMove] = useState(null)
   const [moveMode, setMoveMode] = useState('existing')
@@ -2592,26 +2592,30 @@ function SessionPanel({ workspacesSvc }) {
                                 </div>
                               )}
                               {/* v0.1 元数据层：备注编辑（≤2000 字符，保存走 meta/set，
-                                  乐观更新 + 失败回滚）。 */}
+                                  乐观更新 + 失败回滚；草稿按会话隔离）。 */}
                               <div className="dtl-sec">
                                 <div className="dtl-sec-t">备注</div>
                                 <textarea
                                   className="archv-note"
-                                  value={noteDraftFor === it.sessionId ? noteDraft : (it.note || '')}
+                                  value={Object.prototype.hasOwnProperty.call(noteDrafts, it.sessionId) ? noteDrafts[it.sessionId] : (it.note || '')}
                                   maxLength={2000}
                                   rows={3}
                                   placeholder="给这个会话写点什么（跟随会话持久保存，重启不丢）"
                                   aria-label="会话备注"
-                                  onChange={(e) => { setNoteDraftFor(it.sessionId); setNoteDraft(e.target.value) }}
+                                  onChange={(e) => { setNoteDrafts((m) => ({ ...m, [it.sessionId]: e.target.value })) }}
                                 />
                                 <div className="mv-foot">
                                   <button
                                     type="button"
                                     className="archv-btn archv-go"
                                     disabled={busy !== null}
-                                    onClick={async () => { const ok = await saveNote(it, noteDraftFor === it.sessionId ? noteDraft : (it.note || '')); if (ok) setNoteDraftFor(null) }}
+                                    onClick={async () => {
+                                      const text = Object.prototype.hasOwnProperty.call(noteDrafts, it.sessionId) ? noteDrafts[it.sessionId] : (it.note || '')
+                                      const ok = await saveNote(it, text)
+                                      if (ok) setNoteDrafts((m) => { const next = { ...m }; delete next[it.sessionId]; return next })
+                                    }}
                                   >保存备注</button>
-                                  {noteDraftFor === it.sessionId && noteDraft !== (it.note || '') && <span className="dtl-note">有未保存的修改</span>}
+                                  {Object.prototype.hasOwnProperty.call(noteDrafts, it.sessionId) && noteDrafts[it.sessionId] !== (it.note || '') && <span className="dtl-note">有未保存的修改</span>}
                                 </div>
                               </div>
                               <div className="dtl-sec">

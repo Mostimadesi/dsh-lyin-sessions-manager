@@ -132,14 +132,14 @@ test('merge folds source into target: deduped, source gone, cap truncates overfl
   const ids = []
   for (let i = 0; i < MAX_TAGS_PER_SESSION + 1; i++) ids.push((await index.create(`m-${i}`)).id)
   const [src, dst] = ids
-  const rest = ids.slice(2) // 9 个：src 换成 dst 后恰好 10（slice 上限分支是纯防御，merge 本身去一补一永不超）
+  const rest = ids.slice(2) // MAX-1 个：src 换成 dst 后恰好达上限（slice 上限分支是纯防御，merge 本身去一补一永不超）
   await index.setTags('s-1', rest.concat(src))
   await index.setTags('s-2', [src])
   await index.merge(src, dst)
   const store = await index.read()
   assert.equal(store.tags.some((t) => t.id === src), false)
   assert.ok(store.tags.some((t) => t.id === dst))
-  // s-1: 原有 src 换成 dst，去重后仍 ≤10。
+  // s-1: 原有 src 换成 dst，去重后仍 ≤上限。
   const s1 = store.assignments['s-1']
   assert.equal(s1.includes(src), false)
   assert.equal(s1.includes(dst), true)

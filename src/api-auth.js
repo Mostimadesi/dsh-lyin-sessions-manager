@@ -1,6 +1,7 @@
 // Owner-only, fail-closed gate for every /archived-sessions/* route.
 //
-// TOBYCAI upstream registers 41 routes with no authentication middleware: any
+// TOBYCAI upstream registers its /archived-sessions/* routes with no
+// authentication middleware: any
 // process that can reach the host port can read titles, move or delete
 // sessions. hkkz9522/dsh-session-manager (MIT) solved this with
 // authenticateApiRequest (connection.admit → rejection check → owner-only

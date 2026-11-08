@@ -41,8 +41,9 @@ const PKG_OF = {
   sessionQuery: '@deepseek-ai/dsh-session-query',
   storageDomain: '@deepseek-ai/dsh-storage-domain',
 }
-// cordis 是独立 peer，不在 dsh 的 dependencies 里也能解析到最新版。
-const PEER_PACKAGES = ['@deepseek-ai/cordis', ...HOST_INJECT.map((n) => PKG_OF[n])]
+// （历史：曾用于整包安装清单；现 host peers 走假服务，该常量已无引用。
+//  v0.1 起 HOST_INJECT 含 'connection'，其宿主提供包未在 PKG_OF 映射——若日后
+//  恢复整包安装需先补全映射，故直接删除防止 undefined 混入。）
 
 // Windows 下 npm 是 npm.cmd，spawnSync 不走 shell 解析不到。
 const NPM_BIN = process.platform === 'win32' ? 'npm.cmd' : 'npm'

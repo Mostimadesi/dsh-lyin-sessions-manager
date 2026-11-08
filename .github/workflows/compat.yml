@@ -32,7 +32,7 @@ jobs:
       - name: Verify committed bundles match source
         run: git diff --exit-code -- lib
       - name: Verify host bundle loads
-        run: node -e "import('./lib/index.js').then(m => { if (m.name !== 'dsh-sessions-manager') process.exit(1); }).catch(e => { console.error(e); process.exit(1); })"
+        run: node -e "import('./lib/index.js').then(m => { if (m.name !== 'dsh-lyin-sessions-manager') process.exit(1); }).catch(e => { console.error(e); process.exit(1); })"
 
   # 解析 npm 上 @deepseek-ai/dsh 的 dist-tags，得到需要冒烟的 runtime 版本集合
   resolve-versions:
