@@ -11,7 +11,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { aliveSessionCount, applyTagFilter, canDropOnWorkspace, collapsedVisibleTotal, countRenderedVisible, dotStateFor, dragAutoScrollStep, effectiveTitleOf, filterShapeFromSaved, filterSnapshotOf, foldBranches, foldOrphanSubagents, foldSubagents, noticeToastPlan, openSubagentToast, overflowPlan, pathTail, remainingRows, sessionForNodes, shortId, starredOf, tagDeleteConfirm, titleBackfillDecision, toastDurationFor, workspaceForNodes } from './logic.js'
+import { aliveSessionCount, applyTagFilter, ascPriority, canDropOnWorkspace, collapsedVisibleTotal, countRenderedVisible, dotStateFor, dragAutoScrollStep, effectiveTitleOf, filterShapeFromSaved, filterSnapshotOf, foldBranches, foldOrphanSubagents, foldSubagents, noticeToastPlan, openSubagentToast, overflowPlan, pathTail, priorityOf, remainingRows, reviewOf, sessionForNodes, shortId, starredOf, tagDeleteConfirm, titleBackfillDecision, toastDurationFor, workspaceForNodes } from './logic.js'
 
 export const inject = ['slots']
 
@@ -123,6 +123,17 @@ body[data-ds-dark-theme] .archv{color-scheme:dark}
 .archv-star svg{fill:none;stroke:currentColor;stroke-width:1.5;stroke-linejoin:round;stroke-linecap:round;display:block}
 .archv-star-on,.archv-star-on:hover{color:var(--dsw-alias-state-business-primary)}
 .archv-star-on svg{fill:currentColor}
+.archv-review{appearance:none;width:22px;height:22px;flex:none;display:inline-flex;align-items:center;justify-content:center;border:none;background:0 0;padding:0;line-height:0;color:var(--dsw-alias-label-tertiary);cursor:pointer;border-radius:50%;transition:color .15s ease,transform .12s ease}
+.archv-review:hover{background:0 0;color:var(--dsw-alias-label-secondary);transform:scale(1.12)}
+.archv-review:active{transform:scale(.92)}
+.archv-review svg{fill:none;stroke:currentColor;stroke-width:1.5;stroke-linejoin:round;stroke-linecap:round;display:block}
+.archv-review-on,.archv-review-on:hover{color:var(--dsw-alias-state-business-primary)}
+.archv-review-on svg{fill:currentColor}
+.archv-prio{appearance:none;flex:none;height:22px;border:1px solid var(--dsw-alias-stroke-border-default,transparent);background:0 0;color:var(--dsw-alias-label-secondary);font-size:11px;line-height:1;padding:0 2px;border-radius:6px;cursor:pointer}
+.archv-prio:hover{color:var(--dsw-alias-label-primary)}
+.archv-prio-set{color:var(--dsw-alias-state-business-primary);font-weight:600}
+.archv-note{width:100%;box-sizing:border-box;resize:vertical;font:inherit;font-size:12px;line-height:1.6;padding:8px 10px;border-radius:8px;border:1px solid var(--dsw-alias-stroke-border-default,rgba(127,127,127,.35));background:0 0;color:inherit}
+.archv-note:focus{outline:none;border-color:var(--dsw-alias-state-business-primary)}
 .archv-body{flex:1;min-width:0;display:flex;align-items:center;gap:12px}
 .archv-actions{display:flex;gap:8px;flex:none;flex-wrap:nowrap;justify-content:flex-end}
 .archv-btn{appearance:none;min-height:32px;padding:0 12px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-fill-subtle);color:var(--dsw-alias-label-secondary);border-radius:var(--dsm-radius-ctl);font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;justify-content:center;gap:6px;text-align:center;transition:background-color .15s ease,border-color .15s ease,color .15s ease}
@@ -494,13 +505,13 @@ function SessionPanel({ workspacesSvc }) {
   const initialPrefs = useRef(loadPanelPrefs()).current
   // 注意：'storage' 已从可持久化取值中移除（它不再是视图），旧版残留的
   // filter='storage' 会自动回落到 'all'，避免落到一个已不存在的界面。
-  const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starred', 'empty', 'trash'].includes(initialPrefs.filter) ? initialPrefs.filter : 'all')
+  const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starred', 'review', 'empty', 'trash'].includes(initialPrefs.filter) ? initialPrefs.filter : 'all')
   // 低频分类折叠区：挂载时若选中的就是低频分类（偏好恢复/上次停留）则展开，
   // 保证激活 tab 始终可见；平时由箭头 hover/点按控制。
-  const [moreOpen, setMoreOpen] = useState(() => ['starred', 'empty', 'trash'].includes(initialPrefs.filter))
+  const [moreOpen, setMoreOpen] = useState(() => ['starred', 'review', 'empty', 'trash'].includes(initialPrefs.filter))
   const [query, setQuery] = useState('')
   const [workspaceFilter, setWorkspaceFilter] = useState(() => initialPrefs.workspaceFilter || 'all')
-  const [sortBy, setSortBy] = useState(() => ['newest', 'oldest', 'title'].includes(initialPrefs.sortBy) ? initialPrefs.sortBy : 'newest')
+  const [sortBy, setSortBy] = useState(() => ['newest', 'oldest', 'title', 'priority'].includes(initialPrefs.sortBy) ? initialPrefs.sortBy : 'newest')
   const [selected, setSelected] = useState({})
   const [delTarget, setDelTarget] = useState(null)
   // issue #18 第 4 条：删除父会话默认连带回收它的子代理（生命周期绑定），
@@ -509,6 +520,13 @@ function SessionPanel({ workspacesSvc }) {
   useEffect(() => { if (delTarget) setCascadeSub(true) }, [delTarget])
   const [confirmBatch, setConfirmBatch] = useState(false)
   const [batchMoveOpen, setBatchMoveOpen] = useState(false)
+  // v0.1 批量标注 sheet（优先级 / 待回看）：与批量移动 sheet 同型。
+  const [batchMetaOpen, setBatchMetaOpen] = useState(false)
+  const [batchPrio, setBatchPrio] = useState('')
+  // 详情面板的备注草稿：noteDraftFor 记录草稿属于哪个会话；null = 无草稿
+  // （textarea 直接显示 it.note）。保存成功后草稿复位，回落到乐观更新后的 note。
+  const [noteDraft, setNoteDraft] = useState('')
+  const [noteDraftFor, setNoteDraftFor] = useState(null)
   const [busy, setBusy] = useState(null)
   const [openMove, setOpenMove] = useState(null)
   const [moveMode, setMoveMode] = useState('existing')
@@ -686,7 +704,7 @@ function SessionPanel({ workspacesSvc }) {
     }
   }
 
-  // 勾选 toggle：从当前本地行推导全量替换列表（>10 个时服务端 409，回滚 +
+  // 勾选 toggle：从当前本地行推导全量替换列表（>20 个时服务端 409，回滚 +
   // 报错——v1 不在前端复刻上限校验，规则只有服务端一份事实源）。
   const toggleTagFor = (sid, tagId) => {
     if (tagBusy !== null) return
@@ -881,7 +899,7 @@ function SessionPanel({ workspacesSvc }) {
     setFilter(shape.view)
     clearSel()
     setConfirmBatch(false)
-    if (shape.view === 'starred' || shape.view === 'empty' || shape.view === 'trash') setMoreOpen(true)
+    if (shape.view === 'starred' || shape.view === 'review' || shape.view === 'empty' || shape.view === 'trash') setMoreOpen(true)
     setWorkspaceFilter(shape.workspace)
     setSortBy(shape.sort)
     setTagFilter(tagUnavailable ? '' : shape.tag)
@@ -1055,6 +1073,62 @@ function SessionPanel({ workspacesSvc }) {
     }
   }
 
+  // —— v0.1 元数据层（优先级 / 待回看 / 备注）：与 toggleStar 同型的乐观更新 ——
+
+  const toggleReview = async (it) => {
+    const next = !it.review
+    setSessions((s) => s && s.map((x) => (x.sessionId === it.sessionId ? { ...x, review: next } : x)))
+    try {
+      await postJSON('/archived-sessions/meta/set', { sessionId: it.sessionId, patch: { review: next } })
+    } catch (e) {
+      setSessions((s) => s && s.map((x) => (x.sessionId === it.sessionId ? { ...x, review: !next } : x)))
+      showToast('待回看标记失败：' + String((e && e.message) || e))
+    }
+  }
+
+  const setPriority = async (it, raw) => {
+    const prev = Number.isInteger(it.priority) ? it.priority : null
+    const priority = raw === '' ? null : Number(raw)
+    if (priority === prev) return
+    setSessions((s) => s && s.map((x) => (x.sessionId === it.sessionId ? { ...x, priority } : x)))
+    try {
+      await postJSON('/archived-sessions/meta/set', { sessionId: it.sessionId, patch: { priority } })
+    } catch (e) {
+      setSessions((s) => s && s.map((x) => (x.sessionId === it.sessionId ? { ...x, priority: prev } : x)))
+      showToast('优先级保存失败：' + String((e && e.message) || e))
+    }
+  }
+
+  const saveNote = async (it, text) => {
+    const prev = typeof it.note === 'string' ? it.note : ''
+    const note = String(text ?? '').slice(0, 2000)
+    setSessions((s) => s && s.map((x) => (x.sessionId === it.sessionId ? { ...x, note } : x)))
+    try {
+      await postJSON('/archived-sessions/meta/set', { sessionId: it.sessionId, patch: { note } })
+      return true
+    } catch (e) {
+      setSessions((s) => s && s.map((x) => (x.sessionId === it.sessionId ? { ...x, note: prev } : x)))
+      showToast('备注保存失败：' + String((e && e.message) || e))
+      return false
+    }
+  }
+
+  // 批量标注：meta/set 本身就是原子批量（单请求全量应用，无部分失败形态），
+  // 失败即整体回滚提示——不需要 hkkz9522 式的逐条结果对话框。
+  const doBatchMeta = async (patch, label) => {
+    if (!selIds.length || busy) return
+    setBusy('__batch__')
+    try {
+      await postJSON('/archived-sessions/meta/set', { sessionIds: selIds, patch })
+      setSessions((s) => s && s.map((x) => (selIds.includes(String(x.sessionId)) ? { ...x, ...patch } : x)))
+      showToast(`已为 ${selIds.length} 个会话${label}`)
+    } catch (e) {
+      showToast(`批量${label}失败：` + String((e && e.message) || e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
   // Markdown 导出：自有路由（/archived-sessions/export-md），blob 触发下载。
   const exportMarkdown = async (it) => {
     if (mdBusy) return
@@ -1142,10 +1216,12 @@ function SessionPanel({ workspacesSvc }) {
   }, [lineage])
   // 列表管线仍要拿到子代理行（折叠判定要用它们挂到父会话下），所以保留一份
   // 未过滤的集合；只有「计数 / 顶层行 / 全选」用 topOnly。
-  const { archivedAll, activeAll, starredAll, emptyAll } = useMemo(() => ({
+  const { archivedAll, activeAll, starredAll, reviewAll, emptyAll } = useMemo(() => ({
     archivedAll: sessions ? sessions.filter((x) => x.archived) : [],
     activeAll: sessions ? sessions.filter((x) => !x.archived) : [],
     starredAll: starredOf(sessions),
+    // v0.1 元数据层：待回看视图（与收藏同型，正交于活动/归档状态）。
+    reviewAll: reviewOf(sessions),
     // issue #6 之三：空白会话单分一类。空白判定来自宿主血缘快照（sizeBytes 阈值
     // 实测校准），与侧栏「空白」标记同源——两处永远不会各说各话。
     emptyAll: sessions ? sessions.filter((x) => { const li = lineage[String(x.sessionId)]; return !!(li && li.empty) }) : [],
@@ -1156,6 +1232,7 @@ function SessionPanel({ workspacesSvc }) {
   const archivedList = useMemo(() => topOnly(archivedAll), [topOnly, archivedAll])
   const activeList = useMemo(() => topOnly(activeAll), [topOnly, activeAll])
   const starredList = useMemo(() => topOnly(starredAll), [topOnly, starredAll])
+  const reviewList = useMemo(() => topOnly(reviewAll), [topOnly, reviewAll])
   const emptyList = useMemo(() => topOnly(emptyAll), [topOnly, emptyAll])
   // 「全部」计数：血缘分组下同样只算能作为一行的会话（子代理在父行徽标里）。
   const totalTopCount = useMemo(() => topOnly(sessions || []).length, [topOnly, sessions])
@@ -1163,7 +1240,7 @@ function SessionPanel({ workspacesSvc }) {
     if (filter === 'trash') return []
     // 注意用 *All（含子代理）：列表管线要靠它们把子代理挂到父会话下；排除子代理
     // 发生在折叠之后的顶层行与计数（见 isSubagentItem / topOnly）。
-    const base = filter === 'archived' ? archivedAll : filter === 'active' ? activeAll : filter === 'starred' ? starredAll : filter === 'empty' ? emptyAll : sessions || []
+    const base = filter === 'archived' ? archivedAll : filter === 'active' ? activeAll : filter === 'starred' ? starredAll : filter === 'review' ? reviewAll : filter === 'empty' ? emptyAll : sessions || []
     // T4 标签筛选（单选，v1 不追多选 AND——理由见 logic.applyTagFilter）：在
     // 搜索/工作区之前先按标签收敛；''/未就绪时谓词原样返回，行为与旧版一致。
     const tagPassed = applyTagFilter(base, tagsReady ? tagFilter : '')
@@ -1178,9 +1255,11 @@ function SessionPanel({ workspacesSvc }) {
     return [...filtered].sort((a, b) => {
       if (sortBy === 'oldest') return Number(a.createdAt || 0) - Number(b.createdAt || 0)
       if (sortBy === 'title') return effectiveTitleOf(a, dsmAuthoritativeTitles).localeCompare(effectiveTitleOf(b, dsmAuthoritativeTitles), 'zh-CN')
+      // v0.1：优先级排序（未设置按 3 归一；同优先级新者在前，见 logic.ascPriority）。
+      if (sortBy === 'priority') return ascPriority(a, b)
       return Number(b.createdAt || 0) - Number(a.createdAt || 0)
     })
-  }, [sessions, archivedAll, activeAll, starredAll, emptyAll, filter, query, workspaceFilter, sortBy, tagFilter, tagsReady])
+  }, [sessions, archivedAll, activeAll, starredAll, reviewAll, emptyAll, filter, query, workspaceFilter, sortBy, tagFilter, tagsReady, dsmAuthoritativeTitles])
   const selIds = Object.keys(selected).filter((k) => selected[k])
   // 「回收站」是独立视图，不共用会话列表。
   const showSessionList = filter !== 'trash'
@@ -1798,13 +1877,14 @@ function SessionPanel({ workspacesSvc }) {
         </div>
       ) : (
         <>
-          <div className={'sess-fwrap' + (moreOpen ? ' sess-fmore-open' : '') + (filter === 'starred' || filter === 'empty' || filter === 'trash' ? ' sess-fsec-on' : '')}>
+          <div className={'sess-fwrap' + (moreOpen ? ' sess-fmore-open' : '') + (filter === 'starred' || filter === 'review' || filter === 'empty' || filter === 'trash' ? ' sess-fsec-on' : '')}>
             <div className="sess-filter" role="tablist" aria-label="会话筛选">
               <button type="button" role="tab" aria-selected={filter === 'all'} className={'sess-fbtn' + (filter === 'all' ? ' sess-fbtn-on' : '')} onClick={() => { setFilter('all'); clearSel(); setConfirmBatch(false) }}>全部 ({totalTopCount})</button>
               <button type="button" role="tab" aria-selected={filter === 'active'} className={'sess-fbtn' + (filter === 'active' ? ' sess-fbtn-on' : '')} onClick={() => { setFilter('active'); clearSel(); setConfirmBatch(false) }}>活动 ({activeList.length})</button>
               <button type="button" role="tab" aria-selected={filter === 'archived'} className={'sess-fbtn' + (filter === 'archived' ? ' sess-fbtn-on' : '')} onClick={() => { setFilter('archived'); clearSel(); setConfirmBatch(false) }}>已归档 ({archivedList.length})</button>
               <span className="sess-fmore" role="tablist" aria-label="更多会话筛选">
                 <button type="button" role="tab" aria-selected={filter === 'starred'} className={'sess-fbtn' + (filter === 'starred' ? ' sess-fbtn-on' : '')} onClick={() => { setFilter('starred'); clearSel(); setConfirmBatch(false) }}>已收藏 ({starredList.length})</button>
+                <button type="button" role="tab" aria-selected={filter === 'review'} className={'sess-fbtn' + (filter === 'review' ? ' sess-fbtn-on' : '')} onClick={() => { setFilter('review'); clearSel(); setConfirmBatch(false) }}>待回看 ({reviewList.length})</button>
                 <button type="button" role="tab" aria-selected={filter === 'empty'} className={'sess-fbtn' + (filter === 'empty' ? ' sess-fbtn-on' : '')} onClick={() => { setFilter('empty'); clearSel(); setConfirmBatch(false) }}>空白 ({emptyList.length})</button>
                 <button type="button" role="tab" aria-selected={filter === 'trash'} className={'sess-fbtn' + (filter === 'trash' ? ' sess-fbtn-on' : '')} onClick={() => { setFilter('trash'); clearSel(); setConfirmBatch(false) }}>回收站 ({trash.length})</button>
               </span>
@@ -1852,8 +1932,8 @@ function SessionPanel({ workspacesSvc }) {
                     type="text"
                     value={mgrTagName}
                     disabled={mgrBusy}
-                    maxLength={24}
-                    placeholder="标签名（不能含斜杠，最长 24 字）"
+                    maxLength={32}
+                    placeholder="标签名（不能含斜杠，最长 32 字）"
                     onChange={(e) => setMgrTagName(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); createTag() } }}
                   />
@@ -1875,7 +1955,7 @@ function SessionPanel({ workspacesSvc }) {
                               type="text"
                               value={renameTagValue}
                               disabled={mgrBusy}
-                              maxLength={24}
+                              maxLength={32}
                               aria-label={'重命名标签 ' + t.name}
                               autoFocus
                               onChange={(e) => setRenameTagValue(e.target.value)}
@@ -2051,7 +2131,7 @@ function SessionPanel({ workspacesSvc }) {
                 <div className="sess-field">
                   <label htmlFor="dsm-sort">排序</label>
                   <select id="dsm-sort" value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
-                    <option value="newest">最新创建</option><option value="oldest">最早创建</option><option value="title">标题 A–Z</option>
+                    <option value="newest">最新创建</option><option value="oldest">最早创建</option><option value="title">标题 A–Z</option><option value="priority">优先级</option>
                   </select>
                 </div>
                 <div className="sess-field">
@@ -2071,7 +2151,7 @@ function SessionPanel({ workspacesSvc }) {
                   {foldedCount || branchFolded
                     ? `，另有 ${[foldedCount ? `${foldedCount} 个子代理折叠在父会话下` : '', branchFolded ? `${branchFolded} 个分支聚成 ${branchGroupCount} 组` : ''].filter(Boolean).join('、')}`
                     : query || workspaceFilter !== 'all' || tagFilter
-                      ? `，共 ${filter === 'archived' ? archivedList.length : filter === 'active' ? activeList.length : filter === 'starred' ? starredList.length : filter === 'empty' ? emptyList.length : totalTopCount} 个`
+                      ? `，共 ${filter === 'archived' ? archivedList.length : filter === 'active' ? activeList.length : filter === 'starred' ? starredList.length : filter === 'review' ? reviewList.length : filter === 'empty' ? emptyList.length : totalTopCount} 个`
                       : (topList.length !== list.length ? `，共 ${list.length} 个` : '')}
                 </span>
                 {/* T4：计数行右侧的保存筛选控件组。保存 = 抓 {view,workspace,
@@ -2129,7 +2209,7 @@ function SessionPanel({ workspacesSvc }) {
 
           {showSessionList && (topList.length > 0 || orphanSubagents.length > 0) && (
             <div className={'sess-batch' + (selIds.length > 0 ? ' sess-batch-pin' : '')}>
-              <span className="sess-btntext">{selIds.length ? `已选 ${selIds.length} 项` : (filter === 'archived' ? `共 ${archivedList.length} 个归档会话` : filter === 'starred' ? `共 ${starredList.length} 个收藏会话` : `共 ${totalTopCount} 个会话（活动 ${activeList.length} / 已归档 ${archivedList.length}）`)}</span>
+              <span className="sess-btntext">{selIds.length ? `已选 ${selIds.length} 项` : (filter === 'archived' ? `共 ${archivedList.length} 个归档会话` : filter === 'starred' ? `共 ${starredList.length} 个收藏会话` : filter === 'review' ? `共 ${reviewList.length} 个待回看会话` : `共 ${totalTopCount} 个会话（活动 ${activeList.length} / 已归档 ${archivedList.length}）`)}</span>
               {/* issue #18 第 3 条：全选只覆盖当前列表里能单独勾选的行；折叠中的
                   子代理 / 分支成员与合成头不参与，避免「选中了看不见的东西」。 */}
               <button type="button" className="archv-btn" disabled={topList.length === 0} title={groupByLineage ? '选中当前列表的会话行（折叠中的子代理与分支成员不会被选中）' : undefined} onClick={selectAll}>全选</button>
@@ -2157,6 +2237,16 @@ function SessionPanel({ workspacesSvc }) {
                       移动所选…
                     </button>
                   )}
+                  <button
+                    type="button"
+                    className="archv-btn"
+                    disabled={busy !== null}
+                    aria-expanded={batchMetaOpen}
+                    title="批量设置优先级 / 待回看"
+                    onClick={() => setBatchMetaOpen(!batchMetaOpen)}
+                  >
+                    标注所选…
+                  </button>
                   <button type="button" className="archv-btn" onClick={clearSel}>取消选择</button>
                 </>
               )}
@@ -2211,11 +2301,48 @@ function SessionPanel({ workspacesSvc }) {
                   </div>
                 </div>
               )}
+              {/* v0.1 批量标注 sheet：meta/set 是单请求原子批量（无部分失败形态），
+                  失败整体提示——不需要 hkkz9522 式逐条结果对话框；批量备注有
+                  覆盖风险，v0.1 不提供（逐会话编辑）。 */}
+              {selIds.length > 0 && batchMetaOpen && (
+                <div className="mv-sheet" role="region" aria-label="批量标注">
+                  <div className="mv-sheet-head">
+                    <h3 className="mv-sheet-title">批量标注 {selIds.length} 个会话</h3>
+                    <button type="button" className="mv-sheet-close" aria-label="关闭" onClick={() => setBatchMetaOpen(false)}>×</button>
+                  </div>
+                  <div className="mv-field">
+                    <label className="mv-field-label" htmlFor="mv-batch-prio">优先级</label>
+                    <select id="mv-batch-prio" value={batchPrio} onChange={(e) => setBatchPrio(e.target.value)}>
+                      <option value="">（不修改）</option>
+                      <option value="1">1 · 最高</option>
+                      <option value="2">2 · 高</option>
+                      <option value="3">3 · 正常</option>
+                      <option value="4">4 · 低</option>
+                      <option value="5">5 · 最低</option>
+                      <option value="clear">清除优先级</option>
+                    </select>
+                  </div>
+                  <div className="mv-foot">
+                    <button type="button" className="archv-btn" onClick={() => setBatchMetaOpen(false)}>取消</button>
+                    <button
+                      type="button"
+                      className="archv-btn archv-go"
+                      disabled={busy !== null || !batchPrio}
+                      onClick={() => { doBatchMeta({ priority: batchPrio === 'clear' ? null : Number(batchPrio) }, batchPrio === 'clear' ? '清除优先级' : `设置优先级 ${batchPrio}`); setBatchPrio(''); setBatchMetaOpen(false) }}
+                    >
+                      {busy === '__batch__' && <span className="archv-spin" aria-hidden="true" />}应用优先级
+                    </button>
+                    <button type="button" className="archv-btn" disabled={busy !== null} onClick={() => { doBatchMeta({ review: true }, '标记待回看'); setBatchMetaOpen(false) }}>标记待回看</button>
+                    <button type="button" className="archv-btn" disabled={busy !== null} onClick={() => { doBatchMeta({ review: false }, '取消待回看'); setBatchMetaOpen(false) }}>取消待回看</button>
+                  </div>
+                  <div className="dtl-note">「（不修改）」时不改优先级；「清除」为显式取消设置（排序回落 3 正常）。备注与标签请逐会话编辑。</div>
+                </div>
+              )}
             </div>
           )}
 
           {showSessionList && topList.length === 0 && orphanSubagents.length === 0 ? (
-            <div className="archv-empty">{query || workspaceFilter !== 'all' || tagFilter ? '没有匹配的会话。请调整搜索词、标签或工作区筛选。' : filter === 'archived' ? '目前没有归档会话。在“全部”里选中会话点“归档”即可收纳进来。' : filter === 'active' ? '目前没有活动会话。' : filter === 'starred' ? '还没有收藏的会话。点击会话左侧的星标即可收藏。' : filter === 'empty' ? '没有空白会话。新开会话还没产生内容时会归到这里，侧栏会自动隐藏它们。' : '暂无可管理的会话。'}</div>
+            <div className="archv-empty">{query || workspaceFilter !== 'all' || tagFilter ? '没有匹配的会话。请调整搜索词、标签或工作区筛选。' : filter === 'archived' ? '目前没有归档会话。在“全部”里选中会话点“归档”即可收纳进来。' : filter === 'active' ? '目前没有活动会话。' : filter === 'starred' ? '还没有收藏的会话。点击会话左侧的星标即可收藏。' : filter === 'review' ? '还没有待回看的会话。打开会话行上的「待回看」开关即可收进来。' : filter === 'empty' ? '没有空白会话。新开会话还没产生内容时会归到这里，侧栏会自动隐藏它们。' : '暂无可管理的会话。'}</div>
           ) : showSessionList ? (
             <div className="archv-list" role="list">
               {topList.map((it) => {
@@ -2270,6 +2397,33 @@ function SessionPanel({ workspacesSvc }) {
                       >
                         <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><path d="M12 2.5l2.9 5.9 6.6.9-4.8 4.6 1.2 6.5-5.9-3.1-5.9 3.1 1.2-6.5L2.5 9.3l6.6-.9z" /></svg>
                       </button>
+                      {/* v0.1 元数据层：待回看开关（书签；与星标同型乐观更新）。 */}
+                      <button
+                        type="button"
+                        className={'archv-review' + (it.review ? ' archv-review-on' : '')}
+                        aria-pressed={!!it.review}
+                        aria-label={(it.review ? '取消待回看 ' : '标记待回看 ') + (it.title || it.sessionId)}
+                        title={it.review ? '取消待回看' : '标记待回看'}
+                        onClick={(e) => { e.stopPropagation(); toggleReview(it) }}
+                      >
+                        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><path d="M6 2h12a1 1 0 0 1 1 1v19l-7-4.7L5 22V3a1 1 0 0 1 1-1z" /></svg>
+                      </button>
+                      {/* v0.1 元数据层：优先级（未设置显示 —，排序按 3 归一）。 */}
+                      <select
+                        className={'archv-prio' + (Number.isInteger(it.priority) ? ' archv-prio-set' : '')}
+                        value={Number.isInteger(it.priority) ? String(it.priority) : ''}
+                        aria-label={'优先级：' + (it.title || it.sessionId)}
+                        title="优先级（1 最高 → 5 最低；未设置按 3 正常参与排序）"
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => { e.stopPropagation(); setPriority(it, e.target.value) }}
+                      >
+                        <option value="">—</option>
+                        <option value="1">P1</option>
+                        <option value="2">P2</option>
+                        <option value="3">P3</option>
+                        <option value="4">P4</option>
+                        <option value="5">P5</option>
+                      </select>
                       <div className="archv-body">
                         <div className="archv-main">
                           <div className="archv-titlerow">
@@ -2378,8 +2532,8 @@ function SessionPanel({ workspacesSvc }) {
                               type="text"
                               value={cardTagName}
                               disabled={locked}
-                              maxLength={24}
-                              placeholder="标签名（不能含斜杠，最长 24 字）"
+                              maxLength={32}
+                              placeholder="标签名（不能含斜杠，最长 32 字）"
                               onChange={(e) => setCardTagName(e.target.value)}
                               onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); createTagAndAttach(it.sessionId) } }}
                             />
@@ -2437,6 +2591,29 @@ function SessionPanel({ workspacesSvc }) {
                                   </div>
                                 </div>
                               )}
+                              {/* v0.1 元数据层：备注编辑（≤2000 字符，保存走 meta/set，
+                                  乐观更新 + 失败回滚）。 */}
+                              <div className="dtl-sec">
+                                <div className="dtl-sec-t">备注</div>
+                                <textarea
+                                  className="archv-note"
+                                  value={noteDraftFor === it.sessionId ? noteDraft : (it.note || '')}
+                                  maxLength={2000}
+                                  rows={3}
+                                  placeholder="给这个会话写点什么（跟随会话持久保存，重启不丢）"
+                                  aria-label="会话备注"
+                                  onChange={(e) => { setNoteDraftFor(it.sessionId); setNoteDraft(e.target.value) }}
+                                />
+                                <div className="mv-foot">
+                                  <button
+                                    type="button"
+                                    className="archv-btn archv-go"
+                                    disabled={busy !== null}
+                                    onClick={async () => { const ok = await saveNote(it, noteDraftFor === it.sessionId ? noteDraft : (it.note || '')); if (ok) setNoteDraftFor(null) }}
+                                  >保存备注</button>
+                                  {noteDraftFor === it.sessionId && noteDraft !== (it.note || '') && <span className="dtl-note">有未保存的修改</span>}
+                                </div>
+                              </div>
                               <div className="dtl-sec">
                                 <div className="dtl-sec-t">导出</div>
                                 <div className="dtl-export">

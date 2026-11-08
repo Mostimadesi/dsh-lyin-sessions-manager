@@ -99,6 +99,30 @@ export function starredOf(items) {
   return (items || []).filter((item) => item && item.starred)
 }
 
+// 待回看过滤（v0.1 元数据层）：与 starredOf 同型，只认 review 字段。
+// host 端保证字段恒存在（true/false），但这里仍按宽松真值判——老快照/缓存行
+// 缺字段时按「未标记」处理，绝不抛错。
+export function reviewOf(items) {
+  return (Array.isArray(items) ? items : []).filter((item) => item && item.review)
+}
+
+// 优先级有效值：1-5 之外（含未设置的 null/undefined）统一按 3（正常）参与
+// 显示与排序——hkkz9522 同款归一。存储层保留「未设置 ≠ 3」的区分（见
+// session-meta-index.js），这里只做展示口径的归一。
+export function priorityOf(item) {
+  const p = item && item.priority
+  return Number.isInteger(p) && p >= 1 && p <= 5 ? p : 3
+}
+
+// 优先级升序（1 最高在前）；同优先级按创建时间新者在前，与默认 newest 的
+// 方向一致，用户在「优先级」与「最新」之间切换时同组顺序稳定不跳。
+export function ascPriority(a, b) {
+  const d = priorityOf(a) - priorityOf(b)
+  if (d) return d
+  // 宽容行（null/缺字段）：同优先级组内按创建时间新者在前；null 行按 0。
+  return Number((b && b.createdAt) || 0) - Number((a && a.createdAt) || 0)
+}
+
 // 血缘折叠：把 origin === 'subagent' 的会话挂到父会话下，返回顶层列表 + 父子
 // 映射 + 折叠数量。
 //
@@ -444,8 +468,8 @@ export function tagDeleteConfirm(name) {
 // 已存筛选快照的字段域：视图与排序必须落在已知枚举里，否则应用一个不存在的
 // 视图会把面板带进没有 tab 的状态。workspace 只验「非空字符串」——工作区可能
 // 已删，删了也允许恢复（筛选结果为 0 行，用户可理解）；tag 允许 ''（=全部）。
-const SAVED_VIEWS = ['all', 'active', 'archived', 'starred', 'empty', 'trash']
-const SAVED_SORTS = ['newest', 'oldest', 'title']
+const SAVED_VIEWS = ['all', 'active', 'archived', 'starred', 'review', 'empty', 'trash']
+const SAVED_SORTS = ['newest', 'oldest', 'title', 'priority']
 
 /**
  * 把面板当前筛选态抓成可持久化的快照（/filters/save 的 filters 载荷）。
