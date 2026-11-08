@@ -1,4 +1,4 @@
-// dsh-sessions-manager — zstd frame helpers.
+// dsh-lyin-sessions-manager — zstd frame helpers.
 //
 // DSH persists session logs as a sequence of concatenated zstd frames. The
 // FIRST frame must be exactly one line: the session header JSON (type

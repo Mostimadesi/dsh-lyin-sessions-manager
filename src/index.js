@@ -1,4 +1,4 @@
-// dsh-sessions-manager — host half.
+// dsh-lyin-sessions-manager — host half.
 //
 // Serves /archived-sessions/* JSON routes (list / restore / restore-many /
 // delete / delete-many / sessions / workspaces / move) over the host
@@ -37,7 +37,7 @@ import { classifyLineage, emptyScanCandidate, isEmptyEventTypes, subagentDescend
 const BUILD_STAMP = typeof __BUILD_STAMP__ !== 'undefined' ? __BUILD_STAMP__ : 'dev'
 
 
-export const name = 'dsh-sessions-manager'
+export const name = 'dsh-lyin-sessions-manager'
 export const inject = ['webServer', 'workspaceRegistry', 'sessionPersistence', 'sessionQuery', 'storageDomain']
 
 const MAX_TITLE = 80
@@ -1391,7 +1391,7 @@ export function apply(ctx) {
       queueRunning = false
     }
     if (notes.length > 0) {
-      try { for (const n of notes) console.warn('[dsh-sessions-manager] ' + n) } catch (e) { /* ignore */ }
+      try { for (const n of notes) console.warn('[dsh-lyin-sessions-manager] ' + n) } catch (e) { /* ignore */ }
     }
     void reason
     return { ran: true, moved, kept: (await pendingMoves.list()).length }
@@ -2534,7 +2534,7 @@ export function apply(ctx) {
 
     // Human-readable Markdown export (one session). Raw-log ZIP export is
     // dsh's own GET /api/session.export — we deliberately do not duplicate it
-    // (see reports/HANDOFF-dsh-sessions-manager-roadmap.md §2.4).
+    // (see reports/HANDOFF-dsh-lyin-sessions-manager-roadmap.md §2.4).
     //
     // 0.1.3 兼容：日志经 inspectSession 分块读取（SessionHandle.read 的
     // offset/length 有界切片），流式渲染 Markdown，客户端断开即取消（signal），
@@ -2982,5 +2982,5 @@ export function apply(ctx) {
     }))
 
     return () => { for (const d of disposers) d() }
-  }, 'dsh-sessions-manager: routes')
+  }, 'dsh-lyin-sessions-manager: routes')
 }

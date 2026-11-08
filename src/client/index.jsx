@@ -1,5 +1,5 @@
 /**
- * dsh-sessions-manager — browser half: renders a single "会话管理" settings
+ * dsh-lyin-sessions-manager — browser half: renders a single "会话管理" settings
  * section (settings.section list slot) that unifies archived-session
  * management and cross-workspace moving. It talks to the host half's
  * /archived-sessions/* JSON routes by fetch, showing every conversation with
@@ -7,7 +7,7 @@
  * actions. All DOM/runtime wiring failures are logged, never thrown — a thrown
  * plugin apply takes down the whole web-shell boot.
  *
- * @module dsh-sessions-manager/client
+ * @module dsh-lyin-sessions-manager/client
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -997,7 +997,7 @@ function SessionPanel({ workspacesSvc }) {
         setCapabilities(caps || null)
         // 构建指纹打到控制台：面板行为与源码不一致时，第一件事就是核对这行——
         // host 端只在宿主启动时加载一次，不重启宿主看到的永远是旧代码。
-        if (caps && caps.buildStamp) console.info('[dsh-sessions-manager] host build:', caps.buildStamp)
+        if (caps && caps.buildStamp) console.info('[dsh-lyin-sessions-manager] host build:', caps.buildStamp)
         setSelected({})
         setDelTarget(null)
         setConfirmBatch(false)
@@ -2779,7 +2779,7 @@ function dsmNotify(text, kind) {
   if (dsmNotifySink && !sidebarAdapter.disabled) { try { dsmNotifySink(text, kind); return } catch (e) { /* fall through */ } }
   let done = false
   try { for (const fn of dsmNoticeHooks) { fn(text, kind); done = true } } catch (e) {}
-  if (!done) { try { console.warn('[dsh-sessions-manager] ' + text) } catch (e) {} }
+  if (!done) { try { console.warn('[dsh-lyin-sessions-manager] ' + text) } catch (e) {} }
 }
 function dsmOnNotice(fn) { dsmNoticeHooks.add(fn); return () => dsmNoticeHooks.delete(fn) }
 // 空白会话一律隐藏（原「纯净视图」的默认行为固化为唯一行为，开关已于
@@ -2936,7 +2936,7 @@ function createSidebarAdapter() {
         // 幂等维护（paint 不再跑），必须整体撤下，绝不能把半残行为留在
         // 官方 UI 上。
         dsmTeardownSidebarAug()
-        try { console.warn('[dsh-sessions-manager] 侧栏注入 adapter v' + SIDEBAR_ADAPTER_VERSION + ' 已停用：未识别到已知的 DSH 侧栏节点结构（上游可能已改版）') } catch (e) {}
+        try { console.warn('[dsh-lyin-sessions-manager] 侧栏注入 adapter v' + SIDEBAR_ADAPTER_VERSION + ' 已停用：未识别到已知的 DSH 侧栏节点结构（上游可能已改版）') } catch (e) {}
       }
     } else if (misses > 0) {
       misses = 0
@@ -3261,7 +3261,7 @@ function installSidebarStatusDots() {
   const debugOverflowOnce = (msg) => {
     if (overflowDebugged) return
     overflowDebugged = true
-    try { console.debug('[dsh-sessions-manager] 展开计数：' + msg) } catch (e) { /* 控制台不可用 */ }
+    try { console.debug('[dsh-lyin-sessions-manager] 展开计数：' + msg) } catch (e) { /* 控制台不可用 */ }
   }
   // 展开按钮的文案基线 / 上次写入值存在 dataset（而非 WeakMap）：HMR / 插件
   // 重装后新闭包里 WeakMap 是空的，会把「已扣减的文案」再当上游原文扣一次；
@@ -3588,7 +3588,7 @@ function installSidebarStatusDots() {
       })
     } catch (e) {
       // 非关键路径：失败就保持上游原样，不影响本次 paint 的其它注入（F5）。
-      try { console.debug('[dsh-sessions-manager] 展开计数校准跳过：' + (e && e.message)) } catch (e2) {}
+      try { console.debug('[dsh-lyin-sessions-manager] 展开计数校准跳过：' + (e && e.message)) } catch (e2) {}
     }
   }
   // 把计划落到按钮上：文案基线 / 上次写入值 / 口径版本都记在 dataset

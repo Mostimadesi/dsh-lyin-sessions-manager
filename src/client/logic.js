@@ -1,4 +1,4 @@
-// dsh-sessions-manager — client 纯判定逻辑。
+// dsh-lyin-sessions-manager — client 纯判定逻辑。
 //
 // 侧栏增强里最容易随 DSH 上游变化出回归的三块判定抽到这里：
 // 状态点语义、拖拽可放置校验、fiber node → 会话/工作区识别。

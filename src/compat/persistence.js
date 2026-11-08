@@ -1,5 +1,5 @@
 // Compatibility boundary for the two DSH persistence generations supported by
-// dsh-sessions-manager. Business code consumes normalized headers and complete
+// dsh-lyin-sessions-manager. Business code consumes normalized headers and complete
 // inspections; it never needs to know whether DSH returned a legacy header or
 // a handle-era SessionPersistenceSnapshot.
 //
