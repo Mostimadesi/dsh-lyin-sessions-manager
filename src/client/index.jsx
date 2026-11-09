@@ -3763,13 +3763,6 @@ function installSidebarStatusDots() {
   //   done     → 绿  完成后未读（读过则不再显示）
   //   error    → 红  出错/需关注（与 DSH 自带 StateDot 一致）
   //   (manual  → 蓝  手动标记未读，最高优先级)
-  const COLOR = {
-    manual: 'var(--dsw-alias-state-business-primary)',        // 蓝 手动标记未读
-    running: '#EAB308',                                       // 黄 工作中 (DSH running)
-    feedback: 'var(--dsw-alias-state-warn-primary, #F59E0B)', // 琥珀 需用户反馈 (DSH warning)
-    done: 'var(--dsw-alias-state-success-primary)',           // 绿 完成后未读 (DSH done)
-    error: 'var(--dsw-alias-state-error-primary)',            // 红 出错/需关注 (DSH error)
-  }
   const manualUnread = dsmLoadManual()
   // v3.6.2 #2：原 WeakSet「首绘一次即终身免改」升级为 WeakMap 所有权记录
   // row → { id, text, authoritative }。权威标题**后到**时回填仍由我们持有文本的
@@ -4323,16 +4316,17 @@ function installSidebarStatusDots() {
           }
         }
       }
-      // Read DSH's REAL session status from the row's own StateDot and recolor
-      // it with the user's scheme (we also hide DSH's dot so only ours shows).
+      // Read DSH's REAL session status from the row's own StateDot —
+      // v0.2.4'（用户最终决定）：侧栏不再画任何插件状态点（行首大点与标题
+      // 前小点均已移除，恢复 DSH 原生 StateDot 显示）。本段只做状态**采集**：
+      // quickAccessRegistry 是全局面板「进行中的会话」的数据源。官方未读的
+      // 已读清除（done → read）仍在此处维护。
       const sd = row.querySelector('[data-state]')
-      if (sd) sd.style.display = 'none'
-      let dot = row.querySelector('[' + DOT + ']')
-      // v0.2.4 问题1：done 行命中「进入过」read 集合 → 视为已读，不画点。
       const rawState = dotStateFor({ manualUnread: manualUnread.has(id), dataState: sd ? sd.getAttribute('data-state') : '', isActive: activeId === id })
       const doneReadCleared = rawState === 'done' && dsmLoadDoneRead().has(String(id))
       const state = doneReadCleared ? null : rawState
-      const color = state ? COLOR[state] : null
+      // 手动未读开关：⋯ 菜单「标记未读/已读」仍可切换（dsmToggleManual），
+      // 切换后状态进 registry → 全局面板即时反映；侧栏不再有可点击的点。
       // v0.2 快捷访问：登记非空状态行（标题取基线文本，退化为行文本截断；
       // 状态回落为 null 的行不主动清除——面板侧以「最近一次可见状态」为准，
       // 会话被删除时跳转会失败并给出提示，属可接受降级）。
@@ -4344,49 +4338,6 @@ function installSidebarStatusDots() {
           title: (bl && bl.text) || ((row.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 60)),
         })
       }
-      if (!color) { if (dot) dot.remove(); return }
-      // v0.2.4 问题2：行首大点只在「手动未读」（manual）态显示——它是手动开关；
-      // 其余状态（running/feedback/error/done）只用标题前小点指示，不再双点。
-      if (state !== 'manual') { if (dot) dot.remove(); return }
-      // v0.2.1 内联状态点：在标题文本前放一枚小色点，扫一眼就能定位（用户
-      // 反馈「点应该直接显示在会话名称左侧」）。标题 span 用与回填逻辑同一
-      // 套启发式定位（有基线认基线文本，否则认行内第一个非状态点的文本
-      // span）；状态消失即移除，绝不残留。行首大点保留为手动未读开关。
-      // 注意 previousSibling 可能是文本节点（无 classList），先判节点类型。
-      {
-        const bl = titleBaselines.get(row)
-        const spans = [...row.children].filter((el) => el.tagName === 'SPAN' && !el.querySelector('[data-state]') && (el.textContent || '').trim())
-        const titleHost = (bl && bl.id === id ? spans.find((el) => (el.textContent || '') === bl.text) : null) || spans[0] || null
-        const prev = titleHost && titleHost.previousSibling
-        let inlineDot = prev && prev.nodeType === 1 && prev.classList && prev.classList.contains('dsm-inline-dot')
-          ? prev
-          : null
-        if (titleHost && state) {
-          if (!inlineDot) {
-            inlineDot = document.createElement('span')
-            inlineDot.className = 'dsm-inline-dot'
-            titleHost.parentNode.insertBefore(inlineDot, titleHost)
-          }
-          inlineDot.style.background = color
-        } else if (inlineDot) {
-          inlineDot.remove()
-        }
-      }
-      if (!dot) {
-        dot = document.createElement('span')
-        dot.setAttribute(DOT, '')
-        dot.className = 'dsm-dot'
-        if (!row.hasAttribute('data-dsm-pos')) {
-          if (getComputedStyle(row).position === 'static') row.style.position = 'relative'
-          row.setAttribute('data-dsm-pos', '')
-        }
-        dot.addEventListener('click', (e) => {
-          e.stopPropagation(); e.preventDefault()
-          dsmToggleManual(id)
-        })
-        row.insertBefore(dot, row.firstChild)
-      }
-      dot.style.background = color
     })
     dsmSyncEmptyGroups(purgedNow)
     // issue #16：等隐藏标记落定后再校准展开计数（数据层优先，DOM 标记兜底）。
