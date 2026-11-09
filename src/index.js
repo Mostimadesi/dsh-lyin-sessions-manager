@@ -311,6 +311,40 @@ export function apply(ctx) {
   let wsByPath = {}
 
   // 把原始元数据渲染成列表项。缓存命中与解码两条路径共用，保证输出一致。
+  // v0.2.8：读一个会话「最近一次 turn/end 的 reason.kind」——DSH 里唯一可靠的
+  // 「本轮正常完成 / 出错 / 中断 / 被中止」信号（实测取值域：completed / error /
+  // aborted / interrupted / max-tokens；侧栏 UI 完全没有 error 态，插件无法从
+  // DOM 推断）。成本控制：①进程内按 (id, sizeBytes) 缓存；②只由 client 在
+  // 「会话刚结束」时按需请求（数量通常个位数），不在列表路径上批量解码。
+  const LAST_TURN_CACHE = new Map() // id → { sizeBytes, kind }
+  async function lastTurnKindOf(id) {
+    const key = String(id)
+    let sizeBytes = null
+    try {
+      const st = await stat(persistence.locate({ id: key }).path)
+      sizeBytes = st.size
+    } catch (e) {
+      // 拿不到文件大小只影响缓存键比较——继续读取，绝不因此跳过（会话可能
+      // 存在于 live 内存而非磁盘文件上）。
+    }
+    const cached = LAST_TURN_CACHE.get(key)
+    if (cached && sizeBytes != null && cached.sizeBytes === sizeBytes) return cached.kind
+    let kind = null
+    try {
+      await persistence.inspectSession(key, {
+        onEvents: (batch) => {
+          for (const ev of batch || []) {
+            if (!ev || ev.type !== 'turn/end') continue
+            const k = ev.data && ev.data.reason && ev.data.reason.kind
+            if (typeof k === 'string') kind = k
+          }
+        },
+      })
+    } catch (e) { /* 读失败：返回 null，不猜 */ }
+    LAST_TURN_CACHE.set(key, { sizeBytes, kind })
+    return kind
+  }
+
   function buildItem(key, meta, usage, exposeUsage) {
     const cwd = meta.cwd || null
     const ws = cwd ? wsByPath[cwd] : undefined
@@ -2544,6 +2578,28 @@ export function apply(ctx) {
     })
 
     // ---- Saved filters (保存筛选, schema v1) --------------------------------
+    // v0.2.8：批量查询「最近一次 turn/end 的 reason.kind」——快捷面板据此把
+    // 刚结束的会话归到「出错」而非「刚完成」。body: { sessionIds: string[] }
+    // 只应由 client 对「刚停止的少数会话」调用（每次可能解码整本日志）。
+    registerRoute({
+      kind: 'exact',
+      path: '/archived-sessions/turn-kind',
+      handler: async (req, res) => {
+        try {
+          const body = await readJsonBody(req)
+          const ids = parseIds(body)
+          if (!ids || !ids.length) return json(res, { ok: false, code: 'DSM_TURN_KIND_INVALID', error: 'missing sessionIds' }, 400)
+          const out = {}
+          for (const sid of ids.slice(0, 20)) {
+            try { out[sid] = await lastTurnKindOf(sid) } catch (e) { out[sid] = null }
+          }
+          json(res, { ok: true, kinds: out })
+        } catch (e) {
+          json(res, { ok: false, code: e && e.code, error: String((e && e.message) || e) }, errorStatus(e))
+        }
+      },
+    })
+
     registerRoute({
       kind: 'exact',
       path: '/archived-sessions/filters/list',

@@ -332,6 +332,30 @@ async function postJSON(path, body) {
 // 登记，展开对应组后自然出现；adapter 熔断时 registry 停止更新（面板显示「暂
 // 无」，不影响官方侧栏）。条目跳转走 dsmSessionsService()（新旧核心双兼容）。
 const quickAccessRegistry = new Map()
+// v0.2.8：本次进程内「曾进入 running」的会话集合——快捷面板据此区分
+// 「刚跑完（曾是 running，现已停）」与「一直空闲」。进入会话时删除，
+// 表示用户已经看过它的终态。
+const dsmRunSeen = new Set()
+// v0.2.8：会话最近一次 turn/end 的 reason.kind（'completed' / 'error' /
+// 'aborted' / 'interrupted' / ...）。由 host 的 /archived-sessions/turn-kind
+// 按需返回（仅在「刚停止」的少数会话上请求一次），用于区分「刚完成」与
+// 「出错」——DSH 侧栏本身没有 error 态。
+const dsmTurnKind = new Map() // sid → kind | 'pending'
+function dsmFetchTurnKind(sid) {
+  fetch('/archived-sessions/turn-kind', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify({ sessionIds: [sid] }),
+  })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((data) => {
+      const kind = data && data.ok && data.kinds ? data.kinds[sid] : null
+      if (typeof kind === 'string') dsmTurnKind.set(sid, kind)
+      else dsmTurnKind.delete(sid) // 查不到 → 下次转变沿再试
+      if (typeof dsmRepaintDots === 'function') dsmRepaintDots()
+    })
+    .catch(() => { dsmTurnKind.delete(sid) })
+}
 
 // —— v0.2.2 快捷面板外观设置（netease-lyrics 同款模式）———————————————
 // 存储：localStorage['dsm-qa-style-v1']，形状 { preset, radius, blur, opacity,
@@ -4102,12 +4126,13 @@ function installSidebarStatusDots() {
         manualUnread.delete(activeId)
         dsmSaveManual()
       }
-      // v0.2.7：进入会话 = 用户亲眼确认过它此刻的状态 → 从快捷面板移出该条目
-      // （权威删除 registry 条目）。旧做法（v0.2.4 把 id 无条件记入持久化
-      // done-read 集合）矫枉过正：「先打开、后完成」的会话在完成瞬间被 read
-      // 集合拦住 → 「刚完成」组永远为空、无法跳转到刚结束的会话（用户实测）。
-      // done/error 的登记不再做任何已读抑制；条目只在进入该会话时移出。
+      // v0.2.8：进入会话 = 用户亲眼确认了它的终态 → ①删面板条目；②清 runSeen，
+      // 否则状态机会永远把它判成「刚完成」。这是状态机的正确复位点。
+      // 注意：若该会话正在 running，下一拍 paint 会重新 add runSeen 并登记为
+      // running——语义正确（正在跑的就该出现在「进行中」）。
       quickAccessRegistry.delete(String(activeId))
+      dsmRunSeen.delete(String(activeId))
+      dsmTurnKind.delete(String(activeId))
     }
     curActive = activeId
     // 每次 paint 只聚合一次：父会话 id → 子代理数（O(n)，避免每行重算）。
@@ -4298,30 +4323,49 @@ function installSidebarStatusDots() {
           }
         }
       }
-      // Read DSH's REAL session status from the row's own StateDot —
-      // v0.2.4'（用户最终决定）：侧栏不再画任何插件状态点（行首大点与标题
-      // 前小点均已移除，恢复 DSH 原生 StateDot 显示）。本段只做状态**采集**：
-      // quickAccessRegistry 是全局面板「进行中的会话」的数据源。官方未读的
-      // 已读清除（done → read）仍在此处维护。
+      // ===== v0.2.8：插件自持状态机（实证 DSH 源码后的正确实现）==========
+      // App.asar 里 @deepseek-ai/dsh-client-ui-workspace 的真实实现：
+      //   sessionNode(): running = status.running; completed = status.completionUnread===true
+      //   sessionStatuses(): ongoing(running) / warning(pendingInteraction) /
+      //                      done(completed) / idle(其他)
+      // 三个致命事实（推翻旧假设）：
+      //   ① DSH 侧栏**没有 error 状态**——出错后 running=false，只落 done/idle；
+      //   ② done 需要 completionUnread=true，而用户一直盯着该会话时它不置位；
+      //   ③ idle 是「普通空闲」，不该进快捷面板。
+      // 因此不能被动读瞬时态：插件自己观察 running→非running 的转变来判定
+      // 「刚完成」，用 dsmRunSeen（会话是否曾进入 running）区分「刚跑完」与
+      // 「一直空闲」。
       const sd = row.querySelector('[data-state]')
-      // v0.2.7：状态语义回归本源——done/error **照常登记**（不做过读抑制、
-      // 不因正在查看而置空）：会话在查看中结束也要进「刚完成」，用户跳转
-      // 进入后才移出。dotStateFor 的 isActive 参数仅 manual/done 的侧栏
-      // 显示语义所用；这里传入但不再因此拦截登记。
-      const rawState = dotStateFor({ manualUnread: manualUnread.has(id), dataState: sd ? sd.getAttribute('data-state') : '', isActive: false })
-      // 手动未读开关：⋯ 菜单「标记未读/已读」仍可切换（dsmToggleManual）。
-      // v0.2.5/v0.2.7：渲染中的行是权威快照——有状态写条目，无状态删条目
-      // （解决「结束后滞留 running」与「空闲会话长期滞留」两类缺陷）。
-      // 折叠分组里的行不进 DOM，不在此路径（已知限制，展开即覆盖）。
-      if (rawState) {
+      const dshState = sd ? String(sd.getAttribute('data-state') || '') : ''
+      const isRunning = dshState === 'ongoing' || dshState === 'running'
+      const isWarning = dshState === 'warning'
+      const sid = String(id)
+      // 曾进入 running 的标记（会话维度，进程内）。
+      if (isRunning) dsmRunSeen.add(sid)
+      // v0.2.8：running→停止 的转变沿触发一次 turn-kind 查询，据 reason.kind 判定
+      // 正常完成 / 出错（DSH 侧栏无 error 态，只能由日志的 turn/end 提供）。
+      if (!isRunning && dsmRunSeen.has(sid) && !dsmTurnKind.has(sid)) {
+        dsmTurnKind.set(sid, 'pending')
+        void dsmFetchTurnKind(sid)
+      }
+      const turnKind = dsmTurnKind.get(sid)
+      const failedKinds = { error: 1, aborted: 1, interrupted: 1 }
+      let qaState = null
+      if (manualUnread.has(sid)) qaState = 'manual'
+      else if (isWarning) qaState = 'feedback'
+      else if (isRunning) qaState = 'running'
+      else if (dsmRunSeen.has(sid)) qaState = (turnKind && failedKinds[turnKind]) ? 'error' : 'done'
+      // 「曾经跑过、现在不跑」= 刚结束：reason.kind 为 error/aborted/interrupted
+      // 归「出错」，其余归「刚完成」。
+      if (qaState) {
         const bl = titleBaselines.get(row)
-        quickAccessRegistry.set(String(id), {
-          sessionId: String(id),
-          state: rawState,
-          title: (bl && bl.text) || ((row.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 60)),
+        quickAccessRegistry.set(sid, {
+          sessionId: sid,
+          state: qaState,
+          title: (bl && bl.text) || ((row.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 60)),
         })
-      } else if (quickAccessRegistry.has(String(id))) {
-        quickAccessRegistry.delete(String(id))
+      } else if (quickAccessRegistry.has(sid)) {
+        quickAccessRegistry.delete(sid)
       }
     })
     dsmSyncEmptyGroups(purgedNow)
