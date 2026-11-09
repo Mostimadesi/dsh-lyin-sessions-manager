@@ -138,16 +138,32 @@ body[data-ds-dark-theme] .archv{color-scheme:dark}
 .dsm-qa-btn{width:100%;text-align:left}
 .dsm-qa-btn-on{color:var(--dsw-alias-state-business-primary)}
 .dsm-qa-backdrop{position:fixed;inset:0;z-index:9990;background:transparent}
-.dsm-qa-panel{position:fixed;left:12px;bottom:56px;z-index:9991;width:min(360px,calc(100vw - 24px));max-height:min(60vh,480px);overflow:auto;padding:10px;border-radius:10px;border:1px solid var(--dsw-alias-stroke-border-default,rgba(127,127,127,.35));background:var(--dsw-alias-surface-primary,#1e1e1e);color:inherit;box-shadow:0 8px 24px rgba(0,0,0,.35)}
-.dsm-qa-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
-.dsm-qa-title{font-size:12px;font-weight:600;opacity:.85}
-.dsm-qa-group{margin-top:8px}
-.dsm-qa-group-t{font-size:11px;opacity:.7;margin-bottom:4px;display:flex;align-items:center;gap:6px}
+/* v0.2.1 面板样式升级（参考 dsh-netease-lyrics 的浮层风格）：深色半透明卡 +
+   backdrop 模糊 + 细描边 + 大圆角，与官方 UI 的 surface token 对齐。 */
+.dsm-qa-panel{position:fixed;left:12px;bottom:56px;z-index:9991;width:min(360px,calc(100vw - 24px));max-height:min(60vh,480px);overflow:auto;padding:12px;border-radius:14px;border:1px solid rgba(127,127,127,.22);background:rgba(24,24,26,.86);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);color:#F1EFE8;box-shadow:0 12px 32px rgba(0,0,0,.45),0 2px 8px rgba(0,0,0,.3)}
+.dsm-qa-panel .dtl-note{color:rgba(241,239,232,.55)}
+.dsm-qa-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid rgba(127,127,127,.16)}
+.dsm-qa-title{font-size:13px;font-weight:600;letter-spacing:.2px}
+.dsm-qa-panel .mv-sheet-close{color:rgba(241,239,232,.6)}
+.dsm-qa-group{margin-top:10px}
+.dsm-qa-group-t{font-size:11px;opacity:.65;margin-bottom:6px;display:flex;align-items:center;gap:6px;text-transform:uppercase;letter-spacing:.4px}
 .dsm-qa-dot{width:8px;height:8px;border-radius:50%;flex:none;display:inline-block}
-.dsm-qa-row{display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:6px 8px;border:none;background:0 0;color:inherit;font-size:12px;border-radius:6px;cursor:pointer}
-.dsm-qa-row:hover{background:rgba(127,127,127,.15)}
+.dsm-qa-row{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:7px 10px;border:none;background:0 0;color:inherit;font-size:12.5px;border-radius:9px;cursor:pointer;transition:background .12s ease}
+.dsm-qa-row:hover{background:rgba(255,255,255,.08)}
+.dsm-qa-row:active{background:rgba(255,255,255,.12)}
 .dsm-qa-row-t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.dsm-qa-err{color:var(--dsw-alias-state-danger-primary,#EF4444)}
+.dsm-qa-err{color:#F87171}
+/* v0.2.1 内联状态点：显示在会话名称左侧（paint 循环注入）。 */
+.dsm-inline-dot{width:7px;height:7px;border-radius:50%;flex:none;display:inline-block;margin-right:7px;vertical-align:middle;box-shadow:0 0 4px rgba(0,0,0,.25)}
+.dsm-inline-dot-wrap{display:inline-flex;align-items:center;min-width:0}
+/* v0.2.1 全局面板（panellist + main）形态。 */
+.dsm-qa-main{padding:18px 22px;max-width:760px;margin:0 auto;font-size:13px;color:#F1EFE8}
+.dsm-qa-main-head{display:flex;align-items:baseline;gap:12px;margin-bottom:14px}
+.dsm-qa-main-title{font-size:16px;font-weight:700;letter-spacing:.3px}
+.dsm-qa-main-count{font-size:12px;opacity:.6}
+.dsm-qa-search{width:100%;box-sizing:border-box;padding:8px 12px;border-radius:9px;border:1px solid rgba(127,127,127,.28);background:rgba(255,255,255,.05);color:inherit;font-size:12.5px;margin-bottom:12px}
+.dsm-qa-search:focus{outline:none;border-color:var(--dsw-alias-state-business-primary,#5B8DEF)}
+.dsm-qa-main .dsm-qa-row{padding:9px 12px;font-size:13px}
 .archv-body{flex:1;min-width:0;display:flex;align-items:center;gap:12px}
 .archv-actions{display:flex;gap:8px;flex:none;flex-wrap:nowrap;justify-content:flex-end}
 .archv-btn{appearance:none;min-height:32px;padding:0 12px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-fill-subtle);color:var(--dsw-alias-label-secondary);border-radius:var(--dsm-radius-ctl);font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;justify-content:center;gap:6px;text-align:center;transition:background-color .15s ease,border-color .15s ease,color .15s ease}
@@ -320,6 +336,71 @@ const QA_GROUP_META = [
   { key: 'done', label: '刚完成 · 未读', color: '#22C55E' },
 ]
 
+// 面板本体：全局面板形态（经 main slot 挂载，IG5 逆向工作台同款入口）。
+// 轻量轮询 quickAccessRegistry（1s）——面板按需挂载，不打开就不耗。
+function DsmQuickAccessPanel() {
+  const [rows, setRows] = React.useState([])
+  const [jumpErr, setJumpErr] = React.useState('')
+  const [query, setQuery] = React.useState('')
+  React.useEffect(() => {
+    const tick = () => setRows([...quickAccessRegistry.values()])
+    tick()
+    const timer = window.setInterval(tick, 1000)
+    return () => window.clearInterval(timer)
+  }, [])
+  const groups = React.useMemo(() => groupQuickAccess(rows), [rows])
+  const needle = query.trim().toLocaleLowerCase()
+  const jump = (row) => {
+    const svc = dsmSessionsService()
+    if (!svc || typeof svc.open !== 'function') {
+      setJumpErr('当前运行环境未开放会话切换接口，请在侧栏手动查找该会话')
+      return
+    }
+    try {
+      svc.open(row.sessionId)
+      setJumpErr('')
+    } catch (e) {
+      setJumpErr('跳转失败：' + String((e && e.message) || e))
+    }
+  }
+  return (
+    <div className="dsm-qa-main">
+      <div className="dsm-qa-main-head">
+        <span className="dsm-qa-main-title">需要关注的会话</span>
+        <span className="dsm-qa-main-count">{groups.count > 0 ? `${groups.count} 个会话需要关注` : '当前没有需要关注的会话'}</span>
+      </div>
+      <input
+        className="dsm-qa-search"
+        type="text"
+        value={query}
+        placeholder="筛选（标题 / 状态）"
+        aria-label="筛选需要关注的会话"
+        onChange={(e) => setQuery(e.target.value)}
+      />
+      {jumpErr && <div className="dtl-note dsm-qa-err">{jumpErr}</div>}
+      {groups.count === 0 && <div className="dtl-note">暂无进行中 / 待处理 / 出错 / 刚完成的会话。折叠分组里的会话要展开后才会出现在这里。</div>}
+      {QA_GROUP_META.map(({ key, label, color }) => {
+        let list = groups[key]
+        if (!list || !list.length) return null
+        if (needle) list = list.filter((row) => String(row.title || '').toLocaleLowerCase().includes(needle) || String(row.state || '').includes(needle))
+        if (!list.length) return null
+        return (
+          <div key={key} className="dsm-qa-group">
+            <div className="dsm-qa-group-t"><span className="dsm-qa-dot" style={{ background: color }} />{label}（{list.length}）</div>
+            {list.map((row) => (
+              <button key={row.sessionId} type="button" className="dsm-qa-row" title={(row.title || row.sessionId) + '（点击跳转）'} onClick={() => jump(row)}>
+                <span className="dsm-qa-dot" style={{ background: color }} />
+                <span className="dsm-qa-row-t">{row.title || shortId(row.sessionId)}</span>
+              </button>
+            ))}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// 侧栏底部快捷按钮（保留为次选入口，v0.2 原形态）：点击弹出轻量浮层。
 function DsmQuickAccessFooterButton() {
   const [open, setOpen] = React.useState(false)
   const [rows, setRows] = React.useState([])
@@ -4139,6 +4220,30 @@ function installSidebarStatusDots() {
         })
       }
       if (!color) { if (dot) dot.remove(); return }
+      // v0.2.1 内联状态点：在标题文本前放一枚小色点，扫一眼就能定位（用户
+      // 反馈「点应该直接显示在会话名称左侧」）。标题 span 用与回填逻辑同一
+      // 套启发式定位（有基线认基线文本，否则认行内第一个非状态点的文本
+      // span）；状态消失即移除，绝不残留。行首大点保留为手动未读开关。
+      // 注意 previousSibling 可能是文本节点（无 classList），先判节点类型。
+      {
+        const bl = titleBaselines.get(row)
+        const spans = [...row.children].filter((el) => el.tagName === 'SPAN' && !el.querySelector('[data-state]') && (el.textContent || '').trim())
+        const titleHost = (bl && bl.id === id ? spans.find((el) => (el.textContent || '') === bl.text) : null) || spans[0] || null
+        const prev = titleHost && titleHost.previousSibling
+        let inlineDot = prev && prev.nodeType === 1 && prev.classList && prev.classList.contains('dsm-inline-dot')
+          ? prev
+          : null
+        if (titleHost && state) {
+          if (!inlineDot) {
+            inlineDot = document.createElement('span')
+            inlineDot.className = 'dsm-inline-dot'
+            titleHost.parentNode.insertBefore(inlineDot, titleHost)
+          }
+          inlineDot.style.background = color
+        } else if (inlineDot) {
+          inlineDot.remove()
+        }
+      }
       if (!dot) {
         dot = document.createElement('span')
         dot.setAttribute(DOT, '')
@@ -4727,11 +4832,31 @@ export function apply(ctx) {
   )
   // v0.2 快捷访问：侧栏底部「进行中」入口。footer slot 是官方插槽（与
   // hkkz9522 验证过的同一契约），不依赖 DOM adapter——adapter 熔断时按钮仍在，
-  // 面板显示「暂无」而非报错。
+  // 面板显示「暂无」而非报错。v0.2.1：主入口升级为 sidebar.panellist 图标 +
+  // main 全局面板（IG5 同款），footer 按钮保留为次选轻量入口。
   ctx.slots.inject('sidebar.footer.action', () =>
     ctx.slots.register(
       { name: 'sidebar.footer.action', id: 'dsm-quick-access-footer', order: 40 },
       (props) => <DsmQuickAccessFooterButton {...props} />,
     ),
   )
+  try {
+    ctx.slots.inject('sidebar.panellist', () =>
+      ctx.slots.register(
+        { name: 'sidebar.panellist', id: 'dsm-quick-access-panel', order: 56, label: '进行中的会话' },
+        () => (
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+            <circle cx="8" cy="8" r="2.2" />
+            <path d="M8 1.2a6.8 6.8 0 0 1 6.8 6.8A6.8 6.8 0 0 1 8 14.8 6.8 6.8 0 0 1 1.2 8 6.8 6.8 0 0 1 8 1.2zm0 1.5a5.3 5.3 0 1 0 0 10.6 5.3 5.3 0 0 0 0-10.6z" fillOpacity=".35" />
+          </svg>
+        ),
+      ),
+    )
+    ctx.slots.inject('main', () =>
+      ctx.slots.register(
+        { name: 'main', key: 'dsm-quick-access-panel' },
+        (props) => <DsmQuickAccessPanel {...props} />,
+      ),
+    )
+  } catch (e) { /* 旧宿主无 panellist/main slot 时静默退化为 footer 入口 */ }
 }
