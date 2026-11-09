@@ -4165,6 +4165,7 @@ function installSidebarStatusDots() {
         // attributeFilter，不会自触发重绘。
         if (row.getAttribute(DSM_HIDDEN_ATTR) !== 'trash') row.setAttribute(DSM_HIDDEN_ATTR, 'trash')
         const d = row.querySelector('[' + DOT + ']'); if (d) d.remove()
+        quickAccessRegistry.delete(String(id)) // 行被隐藏：从快捷面板移除
         dsmDropSubList(row, id)
         return
       }
@@ -4198,6 +4199,7 @@ function installSidebarStatusDots() {
         if (row.style.display !== 'none') row.style.display = 'none'
         if (row.getAttribute(DSM_HIDDEN_ATTR) !== 'empty') row.setAttribute(DSM_HIDDEN_ATTR, 'empty')
         const d = row.querySelector('[' + DOT + ']'); if (d) d.remove()
+        quickAccessRegistry.delete(String(id)) // 行被隐藏：从快捷面板移除
         dsmDropSubList(row, id)
         return
       }
@@ -4327,9 +4329,11 @@ function installSidebarStatusDots() {
       const state = doneReadCleared ? null : rawState
       // 手动未读开关：⋯ 菜单「标记未读/已读」仍可切换（dsmToggleManual），
       // 切换后状态进 registry → 全局面板即时反映；侧栏不再有可点击的点。
-      // v0.2 快捷访问：登记非空状态行（标题取基线文本，退化为行文本截断；
-      // 状态回落为 null 的行不主动清除——面板侧以「最近一次可见状态」为准，
-      // 会话被删除时跳转会失败并给出提示，属可接受降级）。
+      // v0.2.5 修正：行**被渲染**且状态算出 null → 权威地删除 registry 条目。
+      // 旧实现（只写不清）导致两类滞留：①会话结束时若行是当前查看行（done+
+      // isActive → 逻辑态 null）或 DSH 摘掉 data-state，条目永远停在 running；
+      // ②空闲会话进过 running 后长期滞留（用户报告的两个症状同根）。
+      // 渲染中的行是权威快照；折叠分组里的行不进 DOM，不在此路径，无风险。
       if (state) {
         const bl = titleBaselines.get(row)
         quickAccessRegistry.set(String(id), {
@@ -4337,6 +4341,8 @@ function installSidebarStatusDots() {
           state,
           title: (bl && bl.text) || ((row.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 60)),
         })
+      } else if (quickAccessRegistry.has(String(id))) {
+        quickAccessRegistry.delete(String(id))
       }
     })
     dsmSyncEmptyGroups(purgedNow)
