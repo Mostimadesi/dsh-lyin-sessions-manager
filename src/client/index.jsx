@@ -166,6 +166,15 @@ body[data-ds-dark-theme] .archv{color-scheme:dark}
 .dsm-qa-search{width:100%;box-sizing:border-box;padding:8px 12px;border-radius:9px;border:1px solid rgba(127,127,127,.28);background:rgba(255,255,255,.05);color:inherit;font-size:12.5px;margin-bottom:12px}
 .dsm-qa-search:focus{outline:none;border-color:var(--dsw-alias-state-business-primary,#5B8DEF)}
 .dsm-qa-main .dsm-qa-row{padding:9px 12px;font-size:13px}
+/* v0.3.0 右侧栏形态：窄布局（右栏 ~320px），去大内边距、行更紧凑。 */
+.dsm-qa-rail{padding:10px 12px;max-width:none;margin:0;font-size:12.5px;color:var(--dsmqa-fg,#F1EFE8)}
+.dsm-qa-rail .dsm-qa-main-head{margin-bottom:8px;gap:8px}
+.dsm-qa-rail .dsm-qa-main-title{font-size:13px;font-weight:600}
+.dsm-qa-rail .dsm-qa-main-count{font-size:11px;opacity:.6}
+.dsm-qa-rail .dsm-qa-search{padding:6px 10px;font-size:12px;margin-bottom:8px}
+.dsm-qa-rail .dsm-qa-row{padding:6px 8px;font-size:12.5px;gap:8px}
+.dsm-qa-rail .dsm-qa-group{margin-top:8px}
+.dsm-qa-rail .dsm-qa-group-t{font-size:10.5px;opacity:.6;margin-bottom:4px}
 /* v0.2.2 外观设置滑杆（原生 range 即可，宽度对齐 mv-field）。 */
 .mv-field input[type="range"]{width:100%;accent-color:var(--dsmqa-fg,#F1EFE8)}
 .archv-body{flex:1;min-width:0;display:flex;align-items:center;gap:12px}
@@ -336,6 +345,23 @@ const quickAccessRegistry = new Map()
 // 「刚跑完（曾是 running，现已停）」与「一直空闲」。进入会话时删除，
 // 表示用户已经看过它的终态。
 const dsmRunSeen = new Set()
+// v0.3.0：右栏标签页的打开入口（apply 时由右栏可用性决定是否赋值）。
+let dsmOpenQuickAccessTab = null
+// 当前选中会话 id（供「在右栏打开」用）：优先宿主 uiWorkspace 快照，退回 DOM
+// 的 aria-selected 行。
+function dsmCurrentActiveId() {
+  try {
+    const ui = dsmClientCtx && dsmClientCtx.get && dsmClientCtx.get('uiWorkspace')
+    const snap = ui && typeof ui.getSnapshot === 'function' ? ui.getSnapshot() : null
+    const id = snap && (snap.current || (snap.selection && snap.selection.current))
+    if (id) return String(id)
+  } catch (e) { /* 忽略 */ }
+  try {
+    const sel = document.querySelector('[role="treeitem"][aria-selected="true"][data-row-key^="session:"]')
+    if (sel) return String(sel.getAttribute('data-row-key')).slice('session:'.length)
+  } catch (e) { /* 忽略 */ }
+  return ''
+}
 // v0.2.8：会话最近一次 turn/end 的 reason.kind（'completed' / 'error' /
 // 'aborted' / 'interrupted' / ...）。由 host 的 /archived-sessions/turn-kind
 // 按需返回（仅在「刚停止」的少数会话上请求一次），用于区分「刚完成」与
@@ -450,7 +476,10 @@ const QA_GROUP_META = [
 
 // 面板本体：全局面板形态（经 main slot 挂载，IG5 逆向工作台同款入口）。
 // 轻量轮询 quickAccessRegistry（1s）——面板按需挂载，不打开就不耗。
-function DsmQuickAccessPanel() {
+// v0.3.0：同一组件服务两种容器——全局面板（main slot，宽布局）与右侧栏
+// 标签页（sidebar.right.pane.tab，窄布局）。compact=true 时去掉大标题与
+// 内边距，适配右栏 ~320px 宽度。
+function DsmQuickAccessPanel({ compact = false } = {}) {
   const [rows, setRows] = React.useState([])
   const [jumpErr, setJumpErr] = React.useState('')
   const [query, setQuery] = React.useState('')
@@ -479,10 +508,18 @@ function DsmQuickAccessPanel() {
     }
   }
   return (
-    <div className="dsm-qa-main">
+    <div className={compact ? 'dsm-qa-rail' : 'dsm-qa-main'}>
       <div className="dsm-qa-main-head">
         <span className="dsm-qa-main-title">需要关注的会话</span>
-        <span className="dsm-qa-main-count">{groups.count > 0 ? `${groups.count} 个会话需要关注` : '当前没有需要关注的会话'}</span>
+        <span className="dsm-qa-main-count">{groups.count > 0 ? `${groups.count} 个` : '暂无'}</span>
+        {!compact && dsmOpenQuickAccessTab && (
+          <button
+            type="button"
+            className="archv-btn"
+            title="在右侧栏打开（可与会话并列查看）"
+            onClick={() => { if (!dsmOpenQuickAccessTab()) setJumpErr('当前没有活动会话，无法在右栏打开') }}
+          >在右栏打开</button>
+        )}
       </div>
       <input
         className="dsm-qa-search"
@@ -4972,4 +5009,50 @@ export function apply(ctx) {
       ),
     )
   } catch (e) { /* 旧宿主无 panellist/main slot 时静默 */ }
+  // v0.3.0：右侧栏标签页形态——DSH 原生右栏（可与会话并列查看，不占主区）。
+  // 契约来自 @deepseek-ai/dsh-client-ui-sidebar-right：
+  //   ctx.sidebarRightTabs.define(id, definition)  定义标签类型
+  //   ctx.sidebarRight.openTabIn(sessionId, id)    在某个会话下打开
+  // body / chip title 分别注册进两个 keyed slot。任一步缺失都静默跳过，
+  // 不影响已有的全局面板入口。
+  try {
+    const QA_TAB_ID = 'dsm-quick-access'
+    const tabs = ctx.get && ctx.get('sidebarRightTabs')
+    if (tabs && typeof tabs.define === 'function') {
+      tabs.define(QA_TAB_ID, {
+        label: () => '需要关注',
+        icon: () => (
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+            <circle cx="8" cy="8" r="2.2" />
+            <path d="M8 1.2a6.8 6.8 0 0 1 6.8 6.8A6.8 6.8 0 0 1 8 14.8 6.8 6.8 0 0 1 1.2 8 6.8 6.8 0 0 1 8 1.2zm0 1.5a5.3 5.3 0 1 0 0 10.6 5.3 5.3 0 0 0 0-10.6z" fillOpacity=".35" />
+          </svg>
+        ),
+        keepMounted: true,
+      })
+      ctx.slots.inject('sidebar.right.pane.tab', () =>
+        ctx.slots.register(
+          { name: 'sidebar.right.pane.tab', key: QA_TAB_ID },
+          () => <DsmQuickAccessPanel compact />,
+        ),
+      )
+      ctx.slots.inject('sidebar.right.pane.tab.title', () =>
+        ctx.slots.register(
+          { name: 'sidebar.right.pane.tab.title', key: QA_TAB_ID },
+          () => <span>需要关注</span>,
+        ),
+      )
+      // 暴露一个打开入口：会话行菜单/侧栏面板栏点击后调用。
+      dsmOpenQuickAccessTab = (sessionId) => {
+        try {
+          const sr = ctx.get && ctx.get('sidebarRight')
+          const target = sessionId || (dsmClientCtx && dsmCurrentActiveId && dsmCurrentActiveId()) || ''
+          if (sr && typeof sr.openTabIn === 'function' && target) {
+            sr.openTabIn(String(target), QA_TAB_ID)
+            return true
+          }
+        } catch (e) { /* 打开失败：退化为全局面板入口 */ }
+        return false
+      }
+    }
+  } catch (e) { /* 右栏标签不可用：全局面板仍是入口 */ }
 }
