@@ -4795,6 +4795,17 @@ function installSidebarDragAutoScroll() {
 
 export function apply(ctx) {
   dsmClientCtx = ctx
+  // 主样式（含全局面板 .dsm-qa-* / 面板 .archv-* / 侧栏 .dsm-*）：插件加载即注入
+  // document.head。原先只挂在 SessionPanel 的 <style>{CSS}</style> 里——设置面板
+  // 不打开，全局面板（main slot）就裸奔（用户实测「完全没观测到 UI 升级」的
+  // 直接原因）。settings 面板内联副本保留（双注入幂等，rebuild 面板不闪样式）。
+  try {
+    if (typeof document !== 'undefined' && document.head) {
+      const s = document.createElement('style')
+      s.textContent = CSS
+      document.head.appendChild(s)
+    }
+  } catch (e) { /* 注入失败时退化为面板内联样式 */ }
   dsmLoadCapabilities()
   // 活跃会话心跳：页面隐藏时不发（用户没在看；host 侧 TTL 到期后自然失效，
   // 于是「无法证明活跃」→ 放行移动，不会把会话永久锁死）。
