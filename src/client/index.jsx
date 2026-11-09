@@ -167,7 +167,7 @@ body[data-ds-dark-theme] .archv{color-scheme:dark}
 .dsm-qa-search:focus{outline:none;border-color:var(--dsw-alias-state-business-primary,#5B8DEF)}
 .dsm-qa-main .dsm-qa-row{padding:9px 12px;font-size:13px}
 /* v0.2.2 外观设置滑杆（原生 range 即可，宽度对齐 mv-field）。 */
-.mv-field input[type="range"]{width:100%;accent-color:var(--dsmqa-c-running,#EAB308)}
+.mv-field input[type="range"]{width:100%;accent-color:var(--dsmqa-fg,#F1EFE8)}
 .archv-body{flex:1;min-width:0;display:flex;align-items:center;gap:12px}
 .archv-actions{display:flex;gap:8px;flex:none;flex-wrap:nowrap;justify-content:flex-end}
 .archv-btn{appearance:none;min-height:32px;padding:0 12px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-fill-subtle);color:var(--dsw-alias-label-secondary);border-radius:var(--dsm-radius-ctl);font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;justify-content:center;gap:6px;text-align:center;transition:background-color .15s ease,border-color .15s ease,color .15s ease}
@@ -345,40 +345,30 @@ const QA_STYLE_PRESETS = {
     '--dsmqa-border': 'rgba(127,127,127,.22)', '--dsmqa-blur': '14px',
     '--dsmqa-radius': '14px', '--dsmqa-width': '760px',
     '--dsmqa-note': 'rgba(241,239,232,.55)',
-    '--dsmqa-c-running': '#EAB308', '--dsmqa-c-feedback': '#F59E0B',
-    '--dsmqa-c-error': '#EF4444', '--dsmqa-c-done': '#22C55E',
   } },
   light: { label: '浅色纸面', vars: {
     '--dsmqa-bg': 'rgba(255,253,248,.92)', '--dsmqa-fg': '#26241F',
     '--dsmqa-border': 'rgba(120,113,95,.28)', '--dsmqa-blur': '14px',
     '--dsmqa-radius': '14px', '--dsmqa-width': '760px',
     '--dsmqa-note': 'rgba(38,36,31,.55)',
-    '--dsmqa-c-running': '#B45309', '--dsmqa-c-feedback': '#D97706',
-    '--dsmqa-c-error': '#DC2626', '--dsmqa-c-done': '#16A34A',
   } },
   ocean: { label: '海洋（青蓝）', vars: {
     '--dsmqa-bg': 'rgba(16,30,42,.88)', '--dsmqa-fg': '#D7ECF7',
     '--dsmqa-border': 'rgba(96,165,250,.28)', '--dsmqa-blur': '14px',
     '--dsmqa-radius': '14px', '--dsmqa-width': '760px',
     '--dsmqa-note': 'rgba(215,236,247,.55)',
-    '--dsmqa-c-running': '#38BDF8', '--dsmqa-c-feedback': '#F59E0B',
-    '--dsmqa-c-error': '#F87171', '--dsmqa-c-done': '#34D399',
   } },
   neon: { label: '霓虹（品红）', vars: {
     '--dsmqa-bg': 'rgba(24,14,28,.88)', '--dsmqa-fg': '#F6D5FF',
     '--dsmqa-border': 'rgba(217,70,239,.35)', '--dsmqa-blur': '16px',
     '--dsmqa-radius': '16px', '--dsmqa-width': '760px',
     '--dsmqa-note': 'rgba(246,213,255,.55)',
-    '--dsmqa-c-running': '#F472B6', '--dsmqa-c-feedback': '#FB923C',
-    '--dsmqa-c-error': '#FB7185', '--dsmqa-c-done': '#A3E635',
   } },
   mono: { label: '黑白（极简）', vars: {
     '--dsmqa-bg': 'rgba(18,18,18,.92)', '--dsmqa-fg': '#F2F2F2',
     '--dsmqa-border': 'rgba(255,255,255,.18)', '--dsmqa-blur': '8px',
     '--dsmqa-radius': '6px', '--dsmqa-width': '700px',
     '--dsmqa-note': 'rgba(242,242,242,.5)',
-    '--dsmqa-c-running': '#E5E5E5', '--dsmqa-c-feedback': '#BDBDBD',
-    '--dsmqa-c-error': '#FFFFFF', '--dsmqa-c-done': '#9E9E9E',
   } },
 }
 
@@ -424,11 +414,14 @@ function applyQaStyle() {
   for (const [key, value] of Object.entries(vars)) root.style.setProperty(key, value)
 }
 
+// v0.2.4 问题3修复：状态点颜色是**语义常量**（黄=进行中/琥珀=待处理/红=出错/
+// 绿=刚完成），不随面板主题预设换色——否则切主题会丢失「什么颜色代表什么」的
+// 指示意义（用户实测反馈）。外观设置只管面板容器样式。
 const QA_GROUP_META = [
-  { key: 'running', label: '进行中', color: 'var(--dsmqa-c-running,#EAB308)' },
-  { key: 'feedback', label: '待你处理', color: 'var(--dsmqa-c-feedback,#F59E0B)' },
-  { key: 'error', label: '出错', color: 'var(--dsmqa-c-error,#EF4444)' },
-  { key: 'done', label: '刚完成 · 未读', color: 'var(--dsmqa-c-done,#22C55E)' },
+  { key: 'running', label: '进行中', color: '#EAB308' },
+  { key: 'feedback', label: '待你处理', color: '#F59E0B' },
+  { key: 'error', label: '出错', color: '#EF4444' },
+  { key: 'done', label: '刚完成 · 未读', color: '#22C55E' },
 ]
 
 // 面板本体：全局面板形态（经 main slot 挂载，IG5 逆向工作台同款入口）。
@@ -834,6 +827,9 @@ function SessionPanel({ workspacesSvc }) {
   const [openTags, setOpenTags] = useState(null)      // 展开标签编辑 sheet 的卡片 sessionId
   const [openTagMgr, setOpenTagMgr] = useState(false) // 标签管理 sheet
   const [qaStyleOpen, setQaStyleOpen] = useState(false) // v0.2.2 面板外观 sheet
+  // v0.2.4 问题3：外观偏好存 localStorage（非响应式），write 后以此 tick 强制
+  // sheet 重读最新值，否则 select/滑杆显示卡在旧值。
+  const [qaStyleTick, setQaStyleTick] = useState(0)
   const [tagBusy, setTagBusy] = useState(null)        // 单会话写锁（sessionId）
   const [mgrBusy, setMgrBusy] = useState(false)       // 管理 sheet 写锁（全局一把）
   const [cardTagName, setCardTagName] = useState('')  // 卡内 sheet「新建标签并贴上」输入
@@ -2129,10 +2125,14 @@ function SessionPanel({ workspacesSvc }) {
 
           {/* v0.2.2 快捷面板外观 sheet：预设下拉 + 四个滑杆，改动即时生效并
               持久化（localStorage['dsm-qa-style-v1']）；「恢复默认」清空细参数
-              回到当前预设的出厂值。 */}
+              回到当前预设的出厂值。v0.2.4 问题3修复：IIFE 每次渲染只读一次
+              localStorage，writeQaStyle 后 React 不知道要重渲染 → select 显示
+              卡在旧值（外观其实已变）。改为受控组件：qaStyleTick state 随每
+              次 write 递增，强制重读最新偏好。 */}
           {qaStyleOpen && (() => {
+            void qaStyleTick // 依赖标记：tick 变化时本 IIFE 重渲染重读 localStorage
             const qaPrefs = readQaStyle()
-            const setPref = (patch) => writeQaStyle(patch)
+            const setPref = (patch) => { writeQaStyle(patch); setQaStyleTick((n) => n + 1) }
             const presetVars = QA_STYLE_PRESETS[qaPrefs.preset] || QA_STYLE_PRESETS['dark-glass']
             const presetNum = (name, fallback) => {
               const m = /(-?[\d.]+)(px)?$/.exec(String(presetVars.vars[name] || ''))
@@ -2177,7 +2177,7 @@ function SessionPanel({ workspacesSvc }) {
                   <input id="dsm-qa-width" type="range" min={480} max={1200} step={20} value={curWidth} onChange={(e) => setPref({ width: Number(e.target.value) })} />
                 </div>
                 <div className="mv-foot">
-                  <button type="button" className="archv-btn" onClick={() => writeQaStyle({ preset: 'dark-glass', radius: null, blur: null, opacity: null, width: null })}>恢复默认</button>
+                  <button type="button" className="archv-btn" onClick={() => setPref({ preset: 'dark-glass', radius: null, blur: null, opacity: null, width: null })}>恢复默认</button>
                   <span className="dtl-note">改动即时生效并保存；细参数在预设之上叠加，切换预设会保留它们（「恢复默认」全部清空）。</span>
                 </div>
               </div>
@@ -3165,6 +3165,32 @@ const SIDEBAR_AUG_CSS = `
 // Shared status-dot state so the ⋯-menu "标记未读" action can toggle the
 // manual flag and trigger a repaint without coupling the two installers.
 const DSM_KEY_MANUAL = 'dsm-manual-unread-v1'
+// v0.2.4 问题1修复：「done（刚完成·未读）」的已读集合。DSH 的行级 done 态
+// 与「用户是否点开过」解耦——点开后 data-state 仍可能停在 done，绿点不灭
+// （用户实测：查看过的会话仍标未读）。这里在**会话进入瞬间**（active 转变沿）
+// 把该 id 记入 read 集合并持久化；done 行命中 read 集即视为已读，不再画点。
+// 手动蓝点（manualUnread）不受影响：它有自己的显式开关语义。
+const DSM_KEY_READ = 'dsm-done-read-v1'
+let dsmDoneRead = null
+function dsmLoadDoneRead() {
+  if (dsmDoneRead) return dsmDoneRead
+  try { dsmDoneRead = new Set(JSON.parse(localStorage.getItem(DSM_KEY_READ) || '[]').map(String)) } catch (e) { dsmDoneRead = new Set() }
+  return dsmDoneRead
+}
+function dsmSaveDoneRead() { try { localStorage.setItem(DSM_KEY_READ, JSON.stringify([...dsmLoadDoneRead()])) } catch (e) {} }
+function dsmMarkDoneRead(id) {
+  const s = dsmLoadDoneRead()
+  if (!s.has(id)) {
+    s.add(id)
+    // 上限修剪：会话删除后 id 不会再出现，集合只增不减会无限增长；超过
+    // 2000 条时丢掉最旧的一半（插入序，Set 保序）。
+    if (s.size > 2000) {
+      const keep = [...s].slice(-1000)
+      dsmDoneRead = new Set(keep)
+    }
+    dsmSaveDoneRead()
+  }
+}
 let dsmManualUnread = null
 let dsmRepaintDots = null
 function dsmLoadManual() {
@@ -4101,9 +4127,14 @@ function installSidebarStatusDots() {
     // Clicking into a manually-marked session auto-clears the manual unread
     // flag (it becomes read on open) — only on the active transition, so a
     // flag set while already viewing it isn't wiped until you re-enter it.
-    if (activeId !== curActive && activeId && manualUnread.has(activeId)) {
-      manualUnread.delete(activeId)
-      dsmSaveManual()
+    if (activeId !== curActive && activeId) {
+      if (manualUnread.has(activeId)) {
+        manualUnread.delete(activeId)
+        dsmSaveManual()
+      }
+      // v0.2.4 问题1：进入会话即把 done 态记为已读（持久化）——官方 data-state
+      // 与查看行为解耦，不记的话绿点永不消失。
+      dsmMarkDoneRead(activeId)
     }
     curActive = activeId
     // 每次 paint 只聚合一次：父会话 id → 子代理数（O(n)，避免每行重算）。
@@ -4297,7 +4328,10 @@ function installSidebarStatusDots() {
       const sd = row.querySelector('[data-state]')
       if (sd) sd.style.display = 'none'
       let dot = row.querySelector('[' + DOT + ']')
-      const state = dotStateFor({ manualUnread: manualUnread.has(id), dataState: sd ? sd.getAttribute('data-state') : '', isActive: activeId === id })
+      // v0.2.4 问题1：done 行命中「进入过」read 集合 → 视为已读，不画点。
+      const rawState = dotStateFor({ manualUnread: manualUnread.has(id), dataState: sd ? sd.getAttribute('data-state') : '', isActive: activeId === id })
+      const doneReadCleared = rawState === 'done' && dsmLoadDoneRead().has(String(id))
+      const state = doneReadCleared ? null : rawState
       const color = state ? COLOR[state] : null
       // v0.2 快捷访问：登记非空状态行（标题取基线文本，退化为行文本截断；
       // 状态回落为 null 的行不主动清除——面板侧以「最近一次可见状态」为准，
@@ -4311,6 +4345,9 @@ function installSidebarStatusDots() {
         })
       }
       if (!color) { if (dot) dot.remove(); return }
+      // v0.2.4 问题2：行首大点只在「手动未读」（manual）态显示——它是手动开关；
+      // 其余状态（running/feedback/error/done）只用标题前小点指示，不再双点。
+      if (state !== 'manual') { if (dot) dot.remove(); return }
       // v0.2.1 内联状态点：在标题文本前放一枚小色点，扫一眼就能定位（用户
       // 反馈「点应该直接显示在会话名称左侧」）。标题 span 用与回填逻辑同一
       // 套启发式定位（有基线认基线文本，否则认行内第一个非状态点的文本
