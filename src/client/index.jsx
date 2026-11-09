@@ -1,4 +1,4 @@
-/**
+﻿/**
  * dsh-lyin-sessions-manager — browser half: renders a single "会话管理" settings
  * section (settings.section list slot) that unifies archived-session
  * management and cross-workspace moving. It talks to the host half's
@@ -5009,45 +5009,48 @@ export function apply(ctx) {
       ),
     )
   } catch (e) { /* 旧宿主无 panellist/main slot 时静默 */ }
-  // v0.3.0：右侧栏标签页形态——DSH 原生右栏（可与会话并列查看，不占主区）。
-  // 契约来自 @deepseek-ai/dsh-client-ui-sidebar-right：
-  //   ctx.sidebarRightTabs.define(id, definition)  定义标签类型
-  //   ctx.sidebarRight.openTabIn(sessionId, id)    在某个会话下打开
-  // body / chip title 分别注册进两个 keyed slot。任一步缺失都静默跳过，
-  // 不影响已有的全局面板入口。
+  // v0.3.1：右侧栏标签页——**按真实源码契约重写**。
+  // 上一版用了不存在的 `sidebarRightTabs.define`，所以什么都没注册（用户实测
+  // 看不到任何变化）。app.asar 里 @deepseek-ai/dsh-client-ui-sidebar-right
+  // 的真实 API：
+  //   ctx.sidebarRight.tabs.register({ id, kind, priority, title(address) })
+  //   ctx.sidebarRight.openTabIn(sessionId, kind, options)
+  // 必填：id 全局唯一、kind 未被占用、title 为函数（每次调用取最新文案）。
   try {
-    const QA_TAB_ID = 'dsm-quick-access'
-    const tabs = ctx.get && ctx.get('sidebarRightTabs')
-    if (tabs && typeof tabs.define === 'function') {
-      tabs.define(QA_TAB_ID, {
-        label: () => '需要关注',
-        icon: () => (
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-            <circle cx="8" cy="8" r="2.2" />
-            <path d="M8 1.2a6.8 6.8 0 0 1 6.8 6.8A6.8 6.8 0 0 1 8 14.8 6.8 6.8 0 0 1 1.2 8 6.8 6.8 0 0 1 8 1.2zm0 1.5a5.3 5.3 0 1 0 0 10.6 5.3 5.3 0 0 0 0-10.6z" fillOpacity=".35" />
-          </svg>
-        ),
-        keepMounted: true,
+    const RAIL_KIND = 'dsm-quick-access'
+    const RAIL_ID = 'dsm-lyin-sessions-manager/quick-access'
+    // 实证服务名（app.asar:5599-5600）：
+    //   ctx.reflect.provide("sidebarRightTabs", tabs)   ← 注册表，直接有 register
+    //   ctx.reflect.provide("sidebarRight", controller) ← 控制器，有 openTabIn
+    const sr = ctx.get && ctx.get('sidebarRight')
+    const tabsReg = ctx.get && ctx.get('sidebarRightTabs')
+    const registry = (tabsReg && typeof tabsReg.register === 'function')
+      ? tabsReg
+      : (sr && sr.tabs && typeof sr.tabs.register === 'function' ? sr.tabs : null)
+    if (registry && typeof registry.register === 'function') {
+      registry.register({
+        id: RAIL_ID,
+        kind: RAIL_KIND,
+        priority: 'extension',
+        title: () => '需要关注',
       })
       ctx.slots.inject('sidebar.right.pane.tab', () =>
         ctx.slots.register(
-          { name: 'sidebar.right.pane.tab', key: QA_TAB_ID },
+          { name: 'sidebar.right.pane.tab', key: RAIL_KIND },
           () => <DsmQuickAccessPanel compact />,
         ),
       )
       ctx.slots.inject('sidebar.right.pane.tab.title', () =>
         ctx.slots.register(
-          { name: 'sidebar.right.pane.tab.title', key: QA_TAB_ID },
+          { name: 'sidebar.right.pane.tab.title', key: RAIL_KIND },
           () => <span>需要关注</span>,
         ),
       )
-      // 暴露一个打开入口：会话行菜单/侧栏面板栏点击后调用。
       dsmOpenQuickAccessTab = (sessionId) => {
         try {
-          const sr = ctx.get && ctx.get('sidebarRight')
-          const target = sessionId || (dsmClientCtx && dsmCurrentActiveId && dsmCurrentActiveId()) || ''
+          const target = sessionId || (dsmCurrentActiveId && dsmCurrentActiveId()) || ''
           if (sr && typeof sr.openTabIn === 'function' && target) {
-            sr.openTabIn(String(target), QA_TAB_ID)
+            sr.openTabIn(String(target), RAIL_KIND)
             return true
           }
         } catch (e) { /* 打开失败：退化为全局面板入口 */ }
