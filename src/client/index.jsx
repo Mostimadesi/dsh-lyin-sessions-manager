@@ -139,9 +139,11 @@ body[data-ds-dark-theme] .archv{color-scheme:dark}
 .dsm-qa-btn-on{color:var(--dsw-alias-state-business-primary)}
 .dsm-qa-backdrop{position:fixed;inset:0;z-index:9990;background:transparent}
 /* v0.2.1 面板样式升级（参考 dsh-netease-lyrics 的浮层风格）：深色半透明卡 +
-   backdrop 模糊 + 细描边 + 大圆角，与官方 UI 的 surface token 对齐。 */
-.dsm-qa-panel{position:fixed;left:12px;bottom:56px;z-index:9991;width:min(360px,calc(100vw - 24px));max-height:min(60vh,480px);overflow:auto;padding:12px;border-radius:14px;border:1px solid rgba(127,127,127,.22);background:rgba(24,24,26,.86);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);color:#F1EFE8;box-shadow:0 12px 32px rgba(0,0,0,.45),0 2px 8px rgba(0,0,0,.3)}
-.dsm-qa-panel .dtl-note{color:rgba(241,239,232,.55)}
+   backdrop 模糊 + 细描边 + 大圆角，与官方 UI 的 surface token 对齐。
+   v0.2.2：可调参数全部抽为 CSS 变量（--dsmqa-*），由 applyQaStyle() 按
+   localStorage 里用户偏好/主题预设注入 :root；缺省值 = 原硬编码值。 */
+.dsm-qa-panel{position:fixed;left:12px;bottom:56px;z-index:9991;width:min(360px,calc(100vw - 24px));max-height:min(60vh,480px);overflow:auto;padding:12px;border-radius:var(--dsmqa-radius,14px);border:1px solid var(--dsmqa-border,rgba(127,127,127,.22));background:var(--dsmqa-bg,rgba(24,24,26,.86));backdrop-filter:blur(var(--dsmqa-blur,14px));-webkit-backdrop-filter:blur(var(--dsmqa-blur,14px));color:var(--dsmqa-fg,#F1EFE8);box-shadow:0 12px 32px rgba(0,0,0,.45),0 2px 8px rgba(0,0,0,.3)}
+.dsm-qa-panel .dtl-note{color:var(--dsmqa-note,rgba(241,239,232,.55))}
 .dsm-qa-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid rgba(127,127,127,.16)}
 .dsm-qa-title{font-size:13px;font-weight:600;letter-spacing:.2px}
 .dsm-qa-panel .mv-sheet-close{color:rgba(241,239,232,.6)}
@@ -157,13 +159,15 @@ body[data-ds-dark-theme] .archv{color-scheme:dark}
 .dsm-inline-dot{width:7px;height:7px;border-radius:50%;flex:none;display:inline-block;margin-right:7px;vertical-align:middle;box-shadow:0 0 4px rgba(0,0,0,.25)}
 .dsm-inline-dot-wrap{display:inline-flex;align-items:center;min-width:0}
 /* v0.2.1 全局面板（panellist + main）形态。 */
-.dsm-qa-main{padding:18px 22px;max-width:760px;margin:0 auto;font-size:13px;color:#F1EFE8}
+.dsm-qa-main{padding:18px 22px;max-width:var(--dsmqa-width,760px);margin:0 auto;font-size:13px;color:var(--dsmqa-fg,#F1EFE8)}
 .dsm-qa-main-head{display:flex;align-items:baseline;gap:12px;margin-bottom:14px}
 .dsm-qa-main-title{font-size:16px;font-weight:700;letter-spacing:.3px}
 .dsm-qa-main-count{font-size:12px;opacity:.6}
 .dsm-qa-search{width:100%;box-sizing:border-box;padding:8px 12px;border-radius:9px;border:1px solid rgba(127,127,127,.28);background:rgba(255,255,255,.05);color:inherit;font-size:12.5px;margin-bottom:12px}
 .dsm-qa-search:focus{outline:none;border-color:var(--dsw-alias-state-business-primary,#5B8DEF)}
 .dsm-qa-main .dsm-qa-row{padding:9px 12px;font-size:13px}
+/* v0.2.2 外观设置滑杆（原生 range 即可，宽度对齐 mv-field）。 */
+.mv-field input[type="range"]{width:100%;accent-color:var(--dsmqa-c-running,#EAB308)}
 .archv-body{flex:1;min-width:0;display:flex;align-items:center;gap:12px}
 .archv-actions{display:flex;gap:8px;flex:none;flex-wrap:nowrap;justify-content:flex-end}
 .archv-btn{appearance:none;min-height:32px;padding:0 12px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-fill-subtle);color:var(--dsw-alias-label-secondary);border-radius:var(--dsm-radius-ctl);font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;justify-content:center;gap:6px;text-align:center;transition:background-color .15s ease,border-color .15s ease,color .15s ease}
@@ -329,11 +333,102 @@ async function postJSON(path, body) {
 // 无」，不影响官方侧栏）。条目跳转走 dsmSessionsService()（新旧核心双兼容）。
 const quickAccessRegistry = new Map()
 
+// —— v0.2.2 快捷面板外观设置（netease-lyrics 同款模式）———————————————
+// 存储：localStorage['dsm-qa-style-v1']，形状 { preset, radius, blur, opacity,
+// width }。preset ∈ PRESET 键；细参数存在时**叠加**于预设之上（调一个滑杆不
+// 抹掉其他偏好）。缺省 preset = 'dark-glass'（即 v0.2.1 的原样式）。
+const QA_STYLE_KEY = 'dsm-qa-style-v1'
+
+const QA_STYLE_PRESETS = {
+  'dark-glass': { label: '深色玻璃（默认）', vars: {
+    '--dsmqa-bg': 'rgba(24,24,26,.86)', '--dsmqa-fg': '#F1EFE8',
+    '--dsmqa-border': 'rgba(127,127,127,.22)', '--dsmqa-blur': '14px',
+    '--dsmqa-radius': '14px', '--dsmqa-width': '760px',
+    '--dsmqa-note': 'rgba(241,239,232,.55)',
+    '--dsmqa-c-running': '#EAB308', '--dsmqa-c-feedback': '#F59E0B',
+    '--dsmqa-c-error': '#EF4444', '--dsmqa-c-done': '#22C55E',
+  } },
+  light: { label: '浅色纸面', vars: {
+    '--dsmqa-bg': 'rgba(255,253,248,.92)', '--dsmqa-fg': '#26241F',
+    '--dsmqa-border': 'rgba(120,113,95,.28)', '--dsmqa-blur': '14px',
+    '--dsmqa-radius': '14px', '--dsmqa-width': '760px',
+    '--dsmqa-note': 'rgba(38,36,31,.55)',
+    '--dsmqa-c-running': '#B45309', '--dsmqa-c-feedback': '#D97706',
+    '--dsmqa-c-error': '#DC2626', '--dsmqa-c-done': '#16A34A',
+  } },
+  ocean: { label: '海洋（青蓝）', vars: {
+    '--dsmqa-bg': 'rgba(16,30,42,.88)', '--dsmqa-fg': '#D7ECF7',
+    '--dsmqa-border': 'rgba(96,165,250,.28)', '--dsmqa-blur': '14px',
+    '--dsmqa-radius': '14px', '--dsmqa-width': '760px',
+    '--dsmqa-note': 'rgba(215,236,247,.55)',
+    '--dsmqa-c-running': '#38BDF8', '--dsmqa-c-feedback': '#F59E0B',
+    '--dsmqa-c-error': '#F87171', '--dsmqa-c-done': '#34D399',
+  } },
+  neon: { label: '霓虹（品红）', vars: {
+    '--dsmqa-bg': 'rgba(24,14,28,.88)', '--dsmqa-fg': '#F6D5FF',
+    '--dsmqa-border': 'rgba(217,70,239,.35)', '--dsmqa-blur': '16px',
+    '--dsmqa-radius': '16px', '--dsmqa-width': '760px',
+    '--dsmqa-note': 'rgba(246,213,255,.55)',
+    '--dsmqa-c-running': '#F472B6', '--dsmqa-c-feedback': '#FB923C',
+    '--dsmqa-c-error': '#FB7185', '--dsmqa-c-done': '#A3E635',
+  } },
+  mono: { label: '黑白（极简）', vars: {
+    '--dsmqa-bg': 'rgba(18,18,18,.92)', '--dsmqa-fg': '#F2F2F2',
+    '--dsmqa-border': 'rgba(255,255,255,.18)', '--dsmqa-blur': '8px',
+    '--dsmqa-radius': '6px', '--dsmqa-width': '700px',
+    '--dsmqa-note': 'rgba(242,242,242,.5)',
+    '--dsmqa-c-running': '#E5E5E5', '--dsmqa-c-feedback': '#BDBDBD',
+    '--dsmqa-c-error': '#FFFFFF', '--dsmqa-c-done': '#9E9E9E',
+  } },
+}
+
+function readQaStyle() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(QA_STYLE_KEY) || '{}') || {}
+    const out = {}
+    out.preset = QA_STYLE_PRESETS[raw.preset] ? raw.preset : 'dark-glass'
+    // 细参数（合法域夹逼）：radius 0-24px / blur 0-28px / opacity 0.3-1（面板
+    // 不透明度，作用于背景色 alpha 重写）/ width 480-1200px。
+    out.radius = Number.isFinite(Number(raw.radius)) && raw.radius >= 0 && raw.radius <= 24 ? Number(raw.radius) : null
+    out.blur = Number.isFinite(Number(raw.blur)) && raw.blur >= 0 && raw.blur <= 28 ? Number(raw.blur) : null
+    out.opacity = Number.isFinite(Number(raw.opacity)) && raw.opacity >= 0.3 && raw.opacity <= 1 ? Number(raw.opacity) : null
+    out.width = Number.isFinite(Number(raw.width)) && raw.width >= 480 && raw.width <= 1200 ? Number(raw.width) : null
+    return out
+  } catch (e) { return { preset: 'dark-glass', radius: null, blur: null, opacity: null, width: null } }
+}
+
+function writeQaStyle(next) {
+  try {
+    const cur = readQaStyle()
+    localStorage.setItem(QA_STYLE_KEY, JSON.stringify({ ...cur, ...next }))
+  } catch (e) { /* 存储不可用时静默：样式回落预设 */ }
+  applyQaStyle()
+}
+
+// 把预设 + 细参数合成为最终 CSS 变量集合，写进 :root。每次调用整体重写
+// （变量表封闭，无残留风险）；opacity 细参数改写背景色的 alpha 通道。
+function applyQaStyle() {
+  if (typeof document === 'undefined' || !document.documentElement) return
+  const prefs = readQaStyle()
+  const preset = QA_STYLE_PRESETS[prefs.preset] || QA_STYLE_PRESETS['dark-glass']
+  const vars = { ...preset.vars }
+  if (prefs.radius != null) vars['--dsmqa-radius'] = prefs.radius + 'px'
+  if (prefs.blur != null) vars['--dsmqa-blur'] = prefs.blur + 'px'
+  if (prefs.width != null) vars['--dsmqa-width'] = prefs.width + 'px'
+  if (prefs.opacity != null) {
+    const m = /^rgba?\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)$/.exec(String(vars['--dsmqa-bg'] || ''))
+    if (m) vars['--dsmqa-bg'] = `rgba(${m[1]},${m[2]},${m[3]},${prefs.opacity})`
+  }
+  const root = document.documentElement
+  for (const key of Object.keys(QA_STYLE_PRESETS['dark-glass'].vars)) root.style.removeProperty(key)
+  for (const [key, value] of Object.entries(vars)) root.style.setProperty(key, value)
+}
+
 const QA_GROUP_META = [
-  { key: 'running', label: '进行中', color: '#EAB308' },
-  { key: 'feedback', label: '待你处理', color: '#F59E0B' },
-  { key: 'error', label: '出错', color: '#EF4444' },
-  { key: 'done', label: '刚完成 · 未读', color: '#22C55E' },
+  { key: 'running', label: '进行中', color: 'var(--dsmqa-c-running,#EAB308)' },
+  { key: 'feedback', label: '待你处理', color: 'var(--dsmqa-c-feedback,#F59E0B)' },
+  { key: 'error', label: '出错', color: 'var(--dsmqa-c-error,#EF4444)' },
+  { key: 'done', label: '刚完成 · 未读', color: 'var(--dsmqa-c-done,#22C55E)' },
 ]
 
 // 面板本体：全局面板形态（经 main slot 挂载，IG5 逆向工作台同款入口）。
@@ -804,6 +899,7 @@ function SessionPanel({ workspacesSvc }) {
   const [savedFilters, setSavedFilters] = useState([])
   const [openTags, setOpenTags] = useState(null)      // 展开标签编辑 sheet 的卡片 sessionId
   const [openTagMgr, setOpenTagMgr] = useState(false) // 标签管理 sheet
+  const [qaStyleOpen, setQaStyleOpen] = useState(false) // v0.2.2 面板外观 sheet
   const [tagBusy, setTagBusy] = useState(null)        // 单会话写锁（sessionId）
   const [mgrBusy, setMgrBusy] = useState(false)       // 管理 sheet 写锁（全局一把）
   const [cardTagName, setCardTagName] = useState('')  // 卡内 sheet「新建标签并贴上」输入
@@ -2090,8 +2186,69 @@ function SessionPanel({ workspacesSvc }) {
               <button type="button" className={'archv-btn' + (aa.settings.inactiveDays ? ' archv-go' : '')} aria-expanded={aaOpen} onClick={() => setAaOpen(!aaOpen)}>
                 自动归档{aa.settings.inactiveDays ? `：${aa.settings.inactiveDays} 天未活跃` : '：未启用'}
               </button>
+              {/* v0.2.2 快捷面板外观：预设 + 细参数（netease-lyrics 同款模式）。 */}
+              <button type="button" className="archv-btn" aria-expanded={qaStyleOpen} title="快捷面板的主题预设与圆角/模糊/不透明度/宽度" onClick={() => setQaStyleOpen(!qaStyleOpen)}>
+                面板外观
+              </button>
               {aa.lastRunAt ? <span className="maint-note">上次检查 {fmtDate(aa.lastRunAt)}，归档 {aa.lastArchivedCount} 个</span> : <span className="maint-note">尚未检查</span>}
           </div>
+
+          {/* v0.2.2 快捷面板外观 sheet：预设下拉 + 四个滑杆，改动即时生效并
+              持久化（localStorage['dsm-qa-style-v1']）；「恢复默认」清空细参数
+              回到当前预设的出厂值。 */}
+          {qaStyleOpen && (() => {
+            const qaPrefs = readQaStyle()
+            const setPref = (patch) => writeQaStyle(patch)
+            const presetVars = QA_STYLE_PRESETS[qaPrefs.preset] || QA_STYLE_PRESETS['dark-glass']
+            const presetNum = (name, fallback) => {
+              const m = /(-?[\d.]+)(px)?$/.exec(String(presetVars.vars[name] || ''))
+              return m ? Number(m[1]) : fallback
+            }
+            const presetAlpha = () => {
+              const m = /([\d.]+)\)$/.exec(String(presetVars.vars['--dsmqa-bg'] || ''))
+              return m ? Number(m[1]) : 0.86
+            }
+            const curRadius = qaPrefs.radius != null ? qaPrefs.radius : presetNum('--dsmqa-radius', 14)
+            const curBlur = qaPrefs.blur != null ? qaPrefs.blur : presetNum('--dsmqa-blur', 14)
+            const curOpacity = qaPrefs.opacity != null ? qaPrefs.opacity : presetAlpha()
+            const curWidth = qaPrefs.width != null ? qaPrefs.width : presetNum('--dsmqa-width', 760)
+            return (
+              <div className="mv-sheet" aria-label="面板外观">
+                <div className="mv-sheet-head">
+                  <h3 className="mv-sheet-title">快捷面板外观</h3>
+                  <button type="button" className="mv-sheet-close" aria-label="关闭" onClick={() => setQaStyleOpen(false)}>×</button>
+                </div>
+                <div className="mv-field">
+                  <label className="mv-field-label" htmlFor="dsm-qa-preset">主题预设</label>
+                  <select id="dsm-qa-preset" value={qaPrefs.preset} onChange={(e) => setPref({ preset: e.target.value })}>
+                    {Object.entries(QA_STYLE_PRESETS).map(([key, p]) => (
+                      <option key={key} value={key}>{p.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="mv-field">
+                  <label className="mv-field-label" htmlFor="dsm-qa-radius">圆角（{curRadius}px）</label>
+                  <input id="dsm-qa-radius" type="range" min={0} max={24} step={1} value={curRadius} onChange={(e) => setPref({ radius: Number(e.target.value) })} />
+                </div>
+                <div className="mv-field">
+                  <label className="mv-field-label" htmlFor="dsm-qa-blur">背景模糊（{curBlur}px）</label>
+                  <input id="dsm-qa-blur" type="range" min={0} max={28} step={1} value={curBlur} onChange={(e) => setPref({ blur: Number(e.target.value) })} />
+                </div>
+                <div className="mv-field">
+                  <label className="mv-field-label" htmlFor="dsm-qa-opacity">不透明度（{Math.round(curOpacity * 100)}%）</label>
+                  <input id="dsm-qa-opacity" type="range" min={0.3} max={1} step={0.02} value={curOpacity} onChange={(e) => setPref({ opacity: Number(e.target.value) })} />
+                </div>
+                <div className="mv-field">
+                  <label className="mv-field-label" htmlFor="dsm-qa-width">面板宽度（{curWidth}px）</label>
+                  <input id="dsm-qa-width" type="range" min={480} max={1200} step={20} value={curWidth} onChange={(e) => setPref({ width: Number(e.target.value) })} />
+                </div>
+                <div className="mv-foot">
+                  <button type="button" className="archv-btn" onClick={() => writeQaStyle({ preset: 'dark-glass', radius: null, blur: null, opacity: null, width: null })}>恢复默认</button>
+                  <span className="dtl-note">改动即时生效并保存；细参数在预设之上叠加，切换预设会保留它们（「恢复默认」全部清空）。</span>
+                </div>
+              </div>
+            )
+          })()}
 
           {/* T4 标签管理 sheet：照自动归档/待移动队列的 mv-sheet 先例。
               每行 = 名字 / 用量 / 重命名（内联输入）/ 并入 select + 确认 / 删除。
@@ -4806,6 +4963,8 @@ export function apply(ctx) {
       document.head.appendChild(s)
     }
   } catch (e) { /* 注入失败时退化为面板内联样式 */ }
+  // v0.2.2：快捷面板外观（预设 + 可调参数）尽早应用，避免首帧闪默认样式。
+  applyQaStyle()
   dsmLoadCapabilities()
   // 活跃会话心跳：页面隐藏时不发（用户没在看；host 侧 TTL 到期后自然失效，
   // 于是「无法证明活跃」→ 放行移动，不会把会话永久锁死）。
