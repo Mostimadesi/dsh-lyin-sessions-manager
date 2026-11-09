@@ -495,75 +495,9 @@ function DsmQuickAccessPanel() {
   )
 }
 
-// 侧栏底部快捷按钮（保留为次选入口，v0.2 原形态）：点击弹出轻量浮层。
-function DsmQuickAccessFooterButton() {
-  const [open, setOpen] = React.useState(false)
-  const [rows, setRows] = React.useState([])
-  const [jumpErr, setJumpErr] = React.useState('')
-  React.useEffect(() => {
-    if (!open) return
-    const tick = () => setRows([...quickAccessRegistry.values()])
-    tick()
-    const timer = window.setInterval(tick, 1000)
-    return () => window.clearInterval(timer)
-  }, [open])
-  const groups = React.useMemo(() => groupQuickAccess(rows), [rows])
-  const jump = (row) => {
-    const svc = dsmSessionsService()
-    if (!svc || typeof svc.open !== 'function') {
-      setJumpErr('当前运行环境未开放会话切换接口，请在侧栏手动查找该会话')
-      return
-    }
-    try {
-      svc.open(row.sessionId)
-      setJumpErr('')
-      setOpen(false)
-    } catch (e) {
-      setJumpErr('跳转失败：' + String((e && e.message) || e))
-    }
-  }
-  return (
-    <div className="dsm-qa-root">
-      <button
-        type="button"
-        className={'archv-btn dsm-qa-btn' + (open ? ' dsm-qa-btn-on' : '')}
-        aria-expanded={open}
-        title="聚合查看：进行中 / 待你处理 / 出错 / 刚完成（点击条目直接跳转）"
-        onClick={() => { setJumpErr(''); setOpen(!open) }}
-      >
-        ⏳ 进行中{groups.count > 0 ? ` (${groups.count})` : ''}
-      </button>
-      {open && (
-        <>
-          <div className="dsm-qa-backdrop" onClick={() => setOpen(false)} />
-          <div className="dsm-qa-panel" role="region" aria-label="进行中的会话">
-            <div className="dsm-qa-head">
-              <span className="dsm-qa-title">需要关注的会话</span>
-              <button type="button" className="mv-sheet-close" aria-label="关闭" onClick={() => setOpen(false)}>×</button>
-            </div>
-            {groups.count === 0 && <div className="dtl-note">暂无进行中 / 待处理 / 出错 / 刚完成的会话。折叠分组里的会话要展开后才会出现在这里。</div>}
-            {jumpErr && <div className="dtl-note dsm-qa-err">{jumpErr}</div>}
-            {QA_GROUP_META.map(({ key, label, color }) => {
-              const list = groups[key]
-              if (!list || !list.length) return null
-              return (
-                <div key={key} className="dsm-qa-group">
-                  <div className="dsm-qa-group-t"><span className="dsm-qa-dot" style={{ background: color }} />{label}（{list.length}）</div>
-                  {list.map((row) => (
-                    <button key={row.sessionId} type="button" className="dsm-qa-row" title={(row.title || row.sessionId) + '（点击跳转）'} onClick={() => jump(row)}>
-                      <span className="dsm-qa-dot" style={{ background: color }} />
-                      <span className="dsm-qa-row-t">{row.title || shortId(row.sessionId)}</span>
-                    </button>
-                  ))}
-                </div>
-              )
-            })}
-          </div>
-        </>
-      )}
-    </div>
-  )
-}
+// v0.2.3：footer 弹层按钮入口已按用户要求移除（全局面板入口为唯一入口，
+// 见 apply() 里的 sidebar.panellist + main 注册）；本组件与 .dsm-qa-panel
+// 弹层 CSS 保留给样式参考，不再注册。
 
 let dsmClientCtx = null
 function dsmSessionsService() {
@@ -5000,16 +4934,8 @@ export function apply(ctx) {
       (props) => <SessionPanel {...props} workspacesSvc={workspacesSvc} />,
     ),
   )
-  // v0.2 快捷访问：侧栏底部「进行中」入口。footer slot 是官方插槽（与
-  // hkkz9522 验证过的同一契约），不依赖 DOM adapter——adapter 熔断时按钮仍在，
-  // 面板显示「暂无」而非报错。v0.2.1：主入口升级为 sidebar.panellist 图标 +
-  // main 全局面板（IG5 同款），footer 按钮保留为次选轻量入口。
-  ctx.slots.inject('sidebar.footer.action', () =>
-    ctx.slots.register(
-      { name: 'sidebar.footer.action', id: 'dsm-quick-access-footer', order: 40 },
-      (props) => <DsmQuickAccessFooterButton {...props} />,
-    ),
-  )
+  // v0.2.3：footer 次选入口按用户要求移除（全局面板入口已足够）；组件与注册
+  // 代码一并删除，避免死代码。
   try {
     ctx.slots.inject('sidebar.panellist', () =>
       ctx.slots.register(
@@ -5028,5 +4954,5 @@ export function apply(ctx) {
         (props) => <DsmQuickAccessPanel {...props} />,
       ),
     )
-  } catch (e) { /* 旧宿主无 panellist/main slot 时静默退化为 footer 入口 */ }
+  } catch (e) { /* 旧宿主无 panellist/main slot 时静默 */ }
 }
