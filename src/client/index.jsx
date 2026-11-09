@@ -447,6 +447,9 @@ function DsmQuickAccessPanel() {
     try {
       svc.open(row.sessionId)
       setJumpErr('')
+      // v0.2.7：跳转 = 用户去亲眼确认了 → 即时移出面板（paint 的 active 转变沿
+      // 也会删一次，这里先删是为了计数不闪）。
+      quickAccessRegistry.delete(String(row.sessionId))
     } catch (e) {
       setJumpErr('跳转失败：' + String((e && e.message) || e))
     }
@@ -3165,32 +3168,6 @@ const SIDEBAR_AUG_CSS = `
 // Shared status-dot state so the ⋯-menu "标记未读" action can toggle the
 // manual flag and trigger a repaint without coupling the two installers.
 const DSM_KEY_MANUAL = 'dsm-manual-unread-v1'
-// v0.2.4 问题1修复：「done（刚完成·未读）」的已读集合。DSH 的行级 done 态
-// 与「用户是否点开过」解耦——点开后 data-state 仍可能停在 done，绿点不灭
-// （用户实测：查看过的会话仍标未读）。这里在**会话进入瞬间**（active 转变沿）
-// 把该 id 记入 read 集合并持久化；done 行命中 read 集即视为已读，不再画点。
-// 手动蓝点（manualUnread）不受影响：它有自己的显式开关语义。
-const DSM_KEY_READ = 'dsm-done-read-v1'
-let dsmDoneRead = null
-function dsmLoadDoneRead() {
-  if (dsmDoneRead) return dsmDoneRead
-  try { dsmDoneRead = new Set(JSON.parse(localStorage.getItem(DSM_KEY_READ) || '[]').map(String)) } catch (e) { dsmDoneRead = new Set() }
-  return dsmDoneRead
-}
-function dsmSaveDoneRead() { try { localStorage.setItem(DSM_KEY_READ, JSON.stringify([...dsmLoadDoneRead()])) } catch (e) {} }
-function dsmMarkDoneRead(id) {
-  const s = dsmLoadDoneRead()
-  if (!s.has(id)) {
-    s.add(id)
-    // 上限修剪：会话删除后 id 不会再出现，集合只增不减会无限增长；超过
-    // 2000 条时丢掉最旧的一半（插入序，Set 保序）。
-    if (s.size > 2000) {
-      const keep = [...s].slice(-1000)
-      dsmDoneRead = new Set(keep)
-    }
-    dsmSaveDoneRead()
-  }
-}
 let dsmManualUnread = null
 let dsmRepaintDots = null
 function dsmLoadManual() {
@@ -4125,9 +4102,12 @@ function installSidebarStatusDots() {
         manualUnread.delete(activeId)
         dsmSaveManual()
       }
-      // v0.2.4 问题1：进入会话即把 done 态记为已读（持久化）——官方 data-state
-      // 与查看行为解耦，不记的话绿点永不消失。
-      dsmMarkDoneRead(activeId)
+      // v0.2.7：进入会话 = 用户亲眼确认过它此刻的状态 → 从快捷面板移出该条目
+      // （权威删除 registry 条目）。旧做法（v0.2.4 把 id 无条件记入持久化
+      // done-read 集合）矫枉过正：「先打开、后完成」的会话在完成瞬间被 read
+      // 集合拦住 → 「刚完成」组永远为空、无法跳转到刚结束的会话（用户实测）。
+      // done/error 的登记不再做任何已读抑制；条目只在进入该会话时移出。
+      quickAccessRegistry.delete(String(activeId))
     }
     curActive = activeId
     // 每次 paint 只聚合一次：父会话 id → 子代理数（O(n)，避免每行重算）。
@@ -4324,21 +4304,20 @@ function installSidebarStatusDots() {
       // quickAccessRegistry 是全局面板「进行中的会话」的数据源。官方未读的
       // 已读清除（done → read）仍在此处维护。
       const sd = row.querySelector('[data-state]')
-      const rawState = dotStateFor({ manualUnread: manualUnread.has(id), dataState: sd ? sd.getAttribute('data-state') : '', isActive: activeId === id })
-      const doneReadCleared = rawState === 'done' && dsmLoadDoneRead().has(String(id))
-      const state = doneReadCleared ? null : rawState
-      // 手动未读开关：⋯ 菜单「标记未读/已读」仍可切换（dsmToggleManual），
-      // 切换后状态进 registry → 全局面板即时反映；侧栏不再有可点击的点。
-      // v0.2.5 修正：行**被渲染**且状态算出 null → 权威地删除 registry 条目。
-      // 旧实现（只写不清）导致两类滞留：①会话结束时若行是当前查看行（done+
-      // isActive → 逻辑态 null）或 DSH 摘掉 data-state，条目永远停在 running；
-      // ②空闲会话进过 running 后长期滞留（用户报告的两个症状同根）。
-      // 渲染中的行是权威快照；折叠分组里的行不进 DOM，不在此路径，无风险。
-      if (state) {
+      // v0.2.7：状态语义回归本源——done/error **照常登记**（不做过读抑制、
+      // 不因正在查看而置空）：会话在查看中结束也要进「刚完成」，用户跳转
+      // 进入后才移出。dotStateFor 的 isActive 参数仅 manual/done 的侧栏
+      // 显示语义所用；这里传入但不再因此拦截登记。
+      const rawState = dotStateFor({ manualUnread: manualUnread.has(id), dataState: sd ? sd.getAttribute('data-state') : '', isActive: false })
+      // 手动未读开关：⋯ 菜单「标记未读/已读」仍可切换（dsmToggleManual）。
+      // v0.2.5/v0.2.7：渲染中的行是权威快照——有状态写条目，无状态删条目
+      // （解决「结束后滞留 running」与「空闲会话长期滞留」两类缺陷）。
+      // 折叠分组里的行不进 DOM，不在此路径（已知限制，展开即覆盖）。
+      if (rawState) {
         const bl = titleBaselines.get(row)
         quickAccessRegistry.set(String(id), {
           sessionId: String(id),
-          state,
+          state: rawState,
           title: (bl && bl.text) || ((row.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 60)),
         })
       } else if (quickAccessRegistry.has(String(id))) {
