@@ -123,6 +123,31 @@ export function ascPriority(a, b) {
   return Number((b && b.createdAt) || 0) - Number((a && a.createdAt) || 0)
 }
 
+// —— v0.2 快捷访问：把侧栏 adapter 采集到的状态行按关注类型分组 ————
+// 输入行形状 { sessionId, state, title }（state 为 dotStateFor 的逻辑态：
+// running / feedback / error / done / manual / null）。
+// 分组：running=进行中、feedback=待你处理、error=出错、done=刚完成·未读
+// （manual 手动未读并入 done——对用户来说是同一件事「回头要看」）。
+// null/未知状态不入面板（那正是「不需要关注」的大多数）。宽松容错：非数组、
+// 洞行、缺 id 一律跳过，绝不抛错——面板是旁路功能，不能因脏数据炸掉侧栏。
+export function groupQuickAccess(rows) {
+  const groups = { running: [], feedback: [], error: [], done: [] }
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (!row || row.sessionId == null) continue
+    if (row.state === 'running') groups.running.push(row)
+    else if (row.state === 'feedback') groups.feedback.push(row)
+    else if (row.state === 'error') groups.error.push(row)
+    else if (row.state === 'done' || row.state === 'manual') groups.done.push(row)
+  }
+  return {
+    running: groups.running,
+    feedback: groups.feedback,
+    error: groups.error,
+    done: groups.done,
+    count: groups.running.length + groups.feedback.length + groups.error.length + groups.done.length,
+  }
+}
+
 // 血缘折叠：把 origin === 'subagent' 的会话挂到父会话下，返回顶层列表 + 父子
 // 映射 + 折叠数量。
 //

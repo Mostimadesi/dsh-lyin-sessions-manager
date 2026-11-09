@@ -11,7 +11,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { aliveSessionCount, applyTagFilter, ascPriority, canDropOnWorkspace, collapsedVisibleTotal, countRenderedVisible, dotStateFor, dragAutoScrollStep, effectiveTitleOf, filterShapeFromSaved, filterSnapshotOf, foldBranches, foldOrphanSubagents, foldSubagents, noticeToastPlan, openSubagentToast, overflowPlan, pathTail, priorityOf, remainingRows, reviewOf, sessionForNodes, shortId, starredOf, tagDeleteConfirm, titleBackfillDecision, toastDurationFor, workspaceForNodes } from './logic.js'
+import { aliveSessionCount, applyTagFilter, ascPriority, canDropOnWorkspace, collapsedVisibleTotal, countRenderedVisible, dotStateFor, dragAutoScrollStep, effectiveTitleOf, filterShapeFromSaved, filterSnapshotOf, foldBranches, foldOrphanSubagents, foldSubagents, groupQuickAccess, noticeToastPlan, openSubagentToast, overflowPlan, pathTail, priorityOf, remainingRows, reviewOf, sessionForNodes, shortId, starredOf, tagDeleteConfirm, titleBackfillDecision, toastDurationFor, workspaceForNodes } from './logic.js'
 
 export const inject = ['slots']
 
@@ -134,6 +134,20 @@ body[data-ds-dark-theme] .archv{color-scheme:dark}
 .archv-prio-set{color:var(--dsw-alias-state-business-primary);font-weight:600}
 .archv-note{width:100%;box-sizing:border-box;resize:vertical;font:inherit;font-size:12px;line-height:1.6;padding:8px 10px;border-radius:8px;border:1px solid var(--dsw-alias-stroke-border-default,rgba(127,127,127,.35));background:0 0;color:inherit}
 .archv-note:focus{outline:none;border-color:var(--dsw-alias-state-business-primary)}
+.dsm-qa-root{position:relative;display:contents}
+.dsm-qa-btn{width:100%;text-align:left}
+.dsm-qa-btn-on{color:var(--dsw-alias-state-business-primary)}
+.dsm-qa-backdrop{position:fixed;inset:0;z-index:9990;background:transparent}
+.dsm-qa-panel{position:fixed;left:12px;bottom:56px;z-index:9991;width:min(360px,calc(100vw - 24px));max-height:min(60vh,480px);overflow:auto;padding:10px;border-radius:10px;border:1px solid var(--dsw-alias-stroke-border-default,rgba(127,127,127,.35));background:var(--dsw-alias-surface-primary,#1e1e1e);color:inherit;box-shadow:0 8px 24px rgba(0,0,0,.35)}
+.dsm-qa-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.dsm-qa-title{font-size:12px;font-weight:600;opacity:.85}
+.dsm-qa-group{margin-top:8px}
+.dsm-qa-group-t{font-size:11px;opacity:.7;margin-bottom:4px;display:flex;align-items:center;gap:6px}
+.dsm-qa-dot{width:8px;height:8px;border-radius:50%;flex:none;display:inline-block}
+.dsm-qa-row{display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:6px 8px;border:none;background:0 0;color:inherit;font-size:12px;border-radius:6px;cursor:pointer}
+.dsm-qa-row:hover{background:rgba(127,127,127,.15)}
+.dsm-qa-row-t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dsm-qa-err{color:var(--dsw-alias-state-danger-primary,#EF4444)}
 .archv-body{flex:1;min-width:0;display:flex;align-items:center;gap:12px}
 .archv-actions{display:flex;gap:8px;flex:none;flex-wrap:nowrap;justify-content:flex-end}
 .archv-btn{appearance:none;min-height:32px;padding:0 12px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-fill-subtle);color:var(--dsw-alias-label-secondary);border-radius:var(--dsm-radius-ctl);font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;justify-content:center;gap:6px;text-align:center;transition:background-color .15s ease,border-color .15s ease,color .15s ease}
@@ -292,6 +306,89 @@ async function postJSON(path, body) {
 //     id 命中已加载目录的子代理时核心会自动解析地址）。核心侧栏点会话走的就是
 //     这条路径（dsh-workspace-kit 0.1.12 起同样从 ctx.sessions.open 迁移过来）。
 // 拿不到任何服务时返回 null，由调用方给出降级提示，绝不触碰私有内部状态。
+// —— v0.2 快捷访问：侧栏底部「进行中」按钮 + 聚合弹出面板 ——————————————
+// 数据源 = 侧栏 adapter 在 paint 时登记的状态行（quickAccessRegistry，与状态点
+// 同源，见 paint 循环写入点）。已知限制：折叠工作区组内的会话行不渲染、不入
+// 登记，展开对应组后自然出现；adapter 熔断时 registry 停止更新（面板显示「暂
+// 无」，不影响官方侧栏）。条目跳转走 dsmSessionsService()（新旧核心双兼容）。
+const quickAccessRegistry = new Map()
+
+const QA_GROUP_META = [
+  { key: 'running', label: '进行中', color: '#EAB308' },
+  { key: 'feedback', label: '待你处理', color: '#F59E0B' },
+  { key: 'error', label: '出错', color: '#EF4444' },
+  { key: 'done', label: '刚完成 · 未读', color: '#22C55E' },
+]
+
+function DsmQuickAccessFooterButton() {
+  const [open, setOpen] = React.useState(false)
+  const [rows, setRows] = React.useState([])
+  const [jumpErr, setJumpErr] = React.useState('')
+  React.useEffect(() => {
+    if (!open) return
+    const tick = () => setRows([...quickAccessRegistry.values()])
+    tick()
+    const timer = window.setInterval(tick, 1000)
+    return () => window.clearInterval(timer)
+  }, [open])
+  const groups = React.useMemo(() => groupQuickAccess(rows), [rows])
+  const jump = (row) => {
+    const svc = dsmSessionsService()
+    if (!svc || typeof svc.open !== 'function') {
+      setJumpErr('当前运行环境未开放会话切换接口，请在侧栏手动查找该会话')
+      return
+    }
+    try {
+      svc.open(row.sessionId)
+      setJumpErr('')
+      setOpen(false)
+    } catch (e) {
+      setJumpErr('跳转失败：' + String((e && e.message) || e))
+    }
+  }
+  return (
+    <div className="dsm-qa-root">
+      <button
+        type="button"
+        className={'archv-btn dsm-qa-btn' + (open ? ' dsm-qa-btn-on' : '')}
+        aria-expanded={open}
+        title="聚合查看：进行中 / 待你处理 / 出错 / 刚完成（点击条目直接跳转）"
+        onClick={() => { setJumpErr(''); setOpen(!open) }}
+      >
+        ⏳ 进行中{groups.count > 0 ? ` (${groups.count})` : ''}
+      </button>
+      {open && (
+        <>
+          <div className="dsm-qa-backdrop" onClick={() => setOpen(false)} />
+          <div className="dsm-qa-panel" role="region" aria-label="进行中的会话">
+            <div className="dsm-qa-head">
+              <span className="dsm-qa-title">需要关注的会话</span>
+              <button type="button" className="mv-sheet-close" aria-label="关闭" onClick={() => setOpen(false)}>×</button>
+            </div>
+            {groups.count === 0 && <div className="dtl-note">暂无进行中 / 待处理 / 出错 / 刚完成的会话。折叠分组里的会话要展开后才会出现在这里。</div>}
+            {jumpErr && <div className="dtl-note dsm-qa-err">{jumpErr}</div>}
+            {QA_GROUP_META.map(({ key, label, color }) => {
+              const list = groups[key]
+              if (!list || !list.length) return null
+              return (
+                <div key={key} className="dsm-qa-group">
+                  <div className="dsm-qa-group-t"><span className="dsm-qa-dot" style={{ background: color }} />{label}（{list.length}）</div>
+                  {list.map((row) => (
+                    <button key={row.sessionId} type="button" className="dsm-qa-row" title={(row.title || row.sessionId) + '（点击跳转）'} onClick={() => jump(row)}>
+                      <span className="dsm-qa-dot" style={{ background: color }} />
+                      <span className="dsm-qa-row-t">{row.title || shortId(row.sessionId)}</span>
+                    </button>
+                  ))}
+                </div>
+              )
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 let dsmClientCtx = null
 function dsmSessionsService() {
   try {
@@ -4030,6 +4127,17 @@ function installSidebarStatusDots() {
       let dot = row.querySelector('[' + DOT + ']')
       const state = dotStateFor({ manualUnread: manualUnread.has(id), dataState: sd ? sd.getAttribute('data-state') : '', isActive: activeId === id })
       const color = state ? COLOR[state] : null
+      // v0.2 快捷访问：登记非空状态行（标题取基线文本，退化为行文本截断；
+      // 状态回落为 null 的行不主动清除——面板侧以「最近一次可见状态」为准，
+      // 会话被删除时跳转会失败并给出提示，属可接受降级）。
+      if (state) {
+        const bl = titleBaselines.get(row)
+        quickAccessRegistry.set(String(id), {
+          sessionId: String(id),
+          state,
+          title: (bl && bl.text) || ((row.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 60)),
+        })
+      }
       if (!color) { if (dot) dot.remove(); return }
       if (!dot) {
         dot = document.createElement('span')
@@ -4615,6 +4723,15 @@ export function apply(ctx) {
     ctx.slots.register(
       { name: 'settings.section', id: 'session-manager', order: 90, label: '会话管理' },
       (props) => <SessionPanel {...props} workspacesSvc={workspacesSvc} />,
+    ),
+  )
+  // v0.2 快捷访问：侧栏底部「进行中」入口。footer slot 是官方插槽（与
+  // hkkz9522 验证过的同一契约），不依赖 DOM adapter——adapter 熔断时按钮仍在，
+  // 面板显示「暂无」而非报错。
+  ctx.slots.inject('sidebar.footer.action', () =>
+    ctx.slots.register(
+      { name: 'sidebar.footer.action', id: 'dsm-quick-access-footer', order: 40 },
+      (props) => <DsmQuickAccessFooterButton {...props} />,
     ),
   )
 }
