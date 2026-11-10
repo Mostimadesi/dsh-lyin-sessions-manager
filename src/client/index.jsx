@@ -345,6 +345,19 @@ const quickAccessRegistry = new Map()
 // 「刚跑完（曾是 running，现已停）」与「一直空闲」。进入会话时删除，
 // 表示用户已经看过它的终态。
 const dsmRunSeen = new Set()
+// v0.3.3 诊断通道：把关键步骤 POST 到宿主 /archived-sessions/debug-log，
+// 落盘到 ~/.dsh/sessions-manager/debug.log（GUI 无 console 时的排障手段）。
+function dsmDebugLog(...parts) {
+  try {
+    const line = parts.map((p) => (typeof p === 'string' ? p : JSON.stringify(p))).join(' ')
+    fetch('/archived-sessions/debug-log', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ lines: [line] }),
+    }).catch(() => {})
+  } catch (e) { /* 诊断失败无副作用 */ }
+}
+
 // v0.3.0：右栏标签页的打开入口（apply 时由右栏可用性决定是否赋值）。
 let dsmOpenQuickAccessTab = null
 // 当前选中会话 id（供「在右栏打开」用）：优先宿主 uiWorkspace 快照，退回 DOM
@@ -481,6 +494,8 @@ const QA_GROUP_META = [
 // 内边距，适配右栏 ~320px 宽度。
 function DsmQuickAccessPanel({ compact = false } = {}) {
   const [rows, setRows] = React.useState([])
+  // v0.3.3 诊断：本体一旦渲染即记录（只记一次），用于判断 slot 是否命中。
+  React.useEffect(() => { dsmDebugLog('rail:body-rendered', 'compact=' + !!compact) }, [compact])
   const [jumpErr, setJumpErr] = React.useState('')
   const [query, setQuery] = React.useState('')
   React.useEffect(() => {
@@ -5027,6 +5042,9 @@ export function apply(ctx) {
     const registry = (tabsReg && typeof tabsReg.register === 'function')
       ? tabsReg
       : (sr && sr.tabs && typeof sr.tabs.register === 'function' ? sr.tabs : null)
+    dsmDebugLog('rail:probe', 'sr=' + !!sr, 'tabsReg=' + !!tabsReg, 'registry=' + !!registry,
+      'srKeys=' + (sr ? Object.keys(sr).slice(0, 24).join(',') : '-'),
+      'tabsRegKeys=' + (tabsReg ? Object.keys(tabsReg).slice(0, 24).join(',') : '-'))
     if (registry && typeof registry.register === 'function') {
       registry.register({
         id: RAIL_ID,
@@ -5052,12 +5070,13 @@ export function apply(ctx) {
           ),
         }],
       })
-      ctx.slots.inject('sidebar.right.pane.tab', () =>
+      dsmDebugLog('rail:register-ok', RAIL_ID, RAIL_KIND)
+      try { ctx.slots.inject('sidebar.right.pane.tab', () =>
         ctx.slots.register(
           { name: 'sidebar.right.pane.tab', key: RAIL_ID },
           () => <DsmQuickAccessPanel compact />,
         ),
-      )
+      ); dsmDebugLog('rail:body-slot-ok') } catch (eB) { dsmDebugLog('rail:body-slot-ERR', String((eB && eB.message) || eB)) }
       ctx.slots.inject('sidebar.right.pane.tab.title', () =>
         ctx.slots.register(
           { name: 'sidebar.right.pane.tab.title', key: RAIL_ID },
@@ -5075,5 +5094,5 @@ export function apply(ctx) {
         return false
       }
     }
-  } catch (e) { /* 右栏标签不可用：全局面板仍是入口 */ }
+  } catch (e) { dsmDebugLog('rail:FATAL', String((e && e.message) || e)) }
 }

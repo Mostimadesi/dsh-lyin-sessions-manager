@@ -1,4 +1,4 @@
-// dsh-lyin-sessions-manager — host half.
+﻿// dsh-lyin-sessions-manager — host half.
 //
 // Serves /archived-sessions/* JSON routes (list / restore / restore-many /
 // delete / delete-many / sessions / workspaces / move) over the host
@@ -7,7 +7,7 @@
 // (workspaceRegistry + storageDomain), folds titles/dates/workspace tags from
 // session persistence, physically removes a session's log file on delete, and
 // relocates a conversation (session) between workspaces on move.
-import { mkdir, readFile, readdir, realpath, rename, rm, stat, unlink, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, readFile, readdir, realpath, rename, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join } from 'node:path'
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -2578,6 +2578,27 @@ export function apply(ctx) {
     })
 
     // ---- Saved filters (保存筛选, schema v1) --------------------------------
+    // v0.3.3 诊断通道：客户端把注册/渲染过程写入 <STATE_DIR>/debug.log，
+    // 供开发者（AI）直接读取——GUI 里看不到 console 时的排障手段。
+    registerRoute({
+      kind: 'exact',
+      path: '/archived-sessions/debug-log',
+      handler: async (req, res) => {
+        try {
+          const body = await readJsonBody(req)
+          const lines = body && Array.isArray(body.lines) ? body.lines.map(String).slice(0, 60) : []
+          if (lines.length) {
+            await mkdir(STATE_DIR, { recursive: true })
+            const text = lines.map((l) => '[' + new Date().toISOString() + '] ' + l).join('\n') + '\n'
+            await appendFile(join(STATE_DIR, 'debug.log'), text, 'utf8')
+          }
+          json(res, { ok: true, count: lines.length })
+        } catch (e) {
+          json(res, { ok: false, error: String((e && e.message) || e) }, 500)
+        }
+      },
+    })
+
     // v0.2.8：批量查询「最近一次 turn/end 的 reason.kind」——快捷面板据此把
     // 刚结束的会话归到「出错」而非「刚完成」。body: { sessionIds: string[] }
     // 只应由 client 对「刚停止的少数会话」调用（每次可能解码整本日志）。
