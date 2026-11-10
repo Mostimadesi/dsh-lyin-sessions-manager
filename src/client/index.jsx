@@ -380,20 +380,30 @@ function dsmCurrentActiveId() {
 // 按需返回（仅在「刚停止」的少数会话上请求一次），用于区分「刚完成」与
 // 「出错」——DSH 侧栏本身没有 error 态。
 const dsmTurnKind = new Map() // sid → kind | 'pending'
-function dsmFetchTurnKind(sid) {
+// v0.3.5：改为**惰性 + 串行小批**。turn-kind 需要宿主解码整本会话日志，多个
+// 大日志同时解码会占满宿主事件循环（可能让模型流式响应卡到超时）——所以只在
+// 面板打开时处理「待分类」条目，且同一时刻至多一批（≤4 个）。
+let dsmTurnKindBatchBusy = false
+function dsmFetchTurnKindBatch(ids) {
+  if (dsmTurnKindBatchBusy || !ids.length) return
+  dsmTurnKindBatchBusy = true
+  const batch = ids.slice(0, 4)
   fetch('/archived-sessions/turn-kind', {
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'application/json' },
-    body: JSON.stringify({ sessionIds: [sid] }),
+    body: JSON.stringify({ sessionIds: batch }),
   })
     .then((r) => (r.ok ? r.json() : null))
     .then((data) => {
-      const kind = data && data.ok && data.kinds ? data.kinds[sid] : null
-      if (typeof kind === 'string') dsmTurnKind.set(sid, kind)
-      else dsmTurnKind.delete(sid) // 查不到 → 下次转变沿再试
+      for (const sid of batch) {
+        const kind = data && data.ok && data.kinds ? data.kinds[sid] : null
+        if (typeof kind === 'string') dsmTurnKind.set(sid, kind)
+        else dsmTurnKind.delete(sid) // 查不到 → 下一拍再试
+      }
       if (typeof dsmRepaintDots === 'function') dsmRepaintDots()
     })
-    .catch(() => { dsmTurnKind.delete(sid) })
+    .catch(() => { for (const sid of batch) dsmTurnKind.delete(sid) })
+    .finally(() => { dsmTurnKindBatchBusy = false })
 }
 
 // —— v0.2.2 快捷面板外观设置（netease-lyrics 同款模式）———————————————
@@ -499,7 +509,14 @@ function DsmQuickAccessPanel({ compact = false } = {}) {
   const [jumpErr, setJumpErr] = React.useState('')
   const [query, setQuery] = React.useState('')
   React.useEffect(() => {
-    const tick = () => setRows([...quickAccessRegistry.values()])
+    const tick = () => {
+      setRows([...quickAccessRegistry.values()])
+      // v0.3.5：面板可见时才做「出错/刚完成」分类（惰性），且一次一批，
+      // 避免宿主为每条刚结束的会话解码整本日志、挤占模型流。
+      const pending = []
+      for (const [sid, kind] of dsmTurnKind.entries()) if (kind === 'pending') pending.push(sid)
+      if (pending.length) dsmFetchTurnKindBatch(pending)
+    }
     tick()
     const timer = window.setInterval(tick, 1000)
     return () => window.clearInterval(timer)
@@ -4397,8 +4414,9 @@ function installSidebarStatusDots() {
       // v0.2.8：running→停止 的转变沿触发一次 turn-kind 查询，据 reason.kind 判定
       // 正常完成 / 出错（DSH 侧栏无 error 态，只能由日志的 turn/end 提供）。
       if (!isRunning && dsmRunSeen.has(sid) && !dsmTurnKind.has(sid)) {
+        // 只登记「待分类」；真正查询推迟到面板可见时（见面板 tick），
+        // 避免会话一结束就让宿主解码整本日志。
         dsmTurnKind.set(sid, 'pending')
-        void dsmFetchTurnKind(sid)
       }
       const turnKind = dsmTurnKind.get(sid)
       const failedKinds = { error: 1, aborted: 1, interrupted: 1 }
