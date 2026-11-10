@@ -11,7 +11,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { aliveSessionCount, applyTagFilter, ascPriority, canDropOnWorkspace, collapsedVisibleTotal, countRenderedVisible, dotStateFor, dragAutoScrollStep, effectiveTitleOf, filterShapeFromSaved, filterSnapshotOf, foldBranches, foldOrphanSubagents, foldSubagents, groupQuickAccess, noticeToastPlan, stateFromSessionStatus, openSubagentToast, overflowPlan, pathTail, priorityOf, remainingRows, reviewOf, sessionForNodes, shortId, starredOf, tagDeleteConfirm, titleBackfillDecision, toastDurationFor, workspaceForNodes } from './logic.js'
+import { aliveSessionCount, applyTagFilter, ascPriority, canDropOnWorkspace, collapsedVisibleTotal, countRenderedVisible, dotStateFor, dragAutoScrollStep, effectiveTitleOf, filterShapeFromSaved, filterSnapshotOf, foldBranches, foldOrphanSubagents, foldSubagentRows, foldSubagents, groupQuickAccess, noticeToastPlan, stateFromSessionStatus, openSubagentToast, overflowPlan, pathTail, priorityOf, remainingRows, reviewOf, sessionForNodes, shortId, starredOf, tagDeleteConfirm, titleBackfillDecision, toastDurationFor, workspaceForNodes } from './logic.js'
 
 export const inject = ['slots']
 
@@ -154,6 +154,7 @@ body[data-ds-dark-theme] .archv{color-scheme:dark}
 .dsm-qa-row:hover{background:rgba(255,255,255,.08)}
 .dsm-qa-row:active{background:rgba(255,255,255,.12)}
 .dsm-qa-row-t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dsm-qa-kids{flex:none;font-size:10.5px;line-height:1;padding:3px 6px;border-radius:999px;border:1px solid rgba(127,127,127,.3);opacity:.75;white-space:nowrap}
 .dsm-qa-err{color:#F87171}
 /* v0.2.1 内联状态点：显示在会话名称左侧（paint 循环注入）。 */
 .dsm-inline-dot{width:7px;height:7px;border-radius:50%;flex:none;display:inline-block;margin-right:7px;vertical-align:middle;box-shadow:0 0 4px rgba(0,0,0,.25)}
@@ -563,6 +564,7 @@ function DsmQuickAccessPanel({ compact = false } = {}) {
     const collect = () => {
       const viaUi = dsmRowsFromUiSession()
       const rows = viaUi !== null ? viaUi : [...quickAccessRegistry.values()]
+      // 注：分类在折叠前做（子代理也需要判定成败），折叠只影响展示层。
       // 「刚完成」需要判定成败（turn-kind），惰性处理：面板可见时一次一批。
       const pending = []
       for (const r of rows) {
@@ -575,7 +577,7 @@ function DsmQuickAccessPanel({ compact = false } = {}) {
         if (kind === 'pending' && !pending.includes(sid)) pending.push(sid)
       }
       if (pending.length) dsmFetchTurnKindBatch(pending)
-      return rows
+      return foldSubagentRows(rows, dsmLineage, (id) => dsmTitleCache.get(id))
     }
     const tick = () => {
       dsmEnsureHostTitles() // 标题补齐（15s 节流）
@@ -611,7 +613,7 @@ function DsmQuickAccessPanel({ compact = false } = {}) {
   return (
     <div className={compact ? 'dsm-qa-rail' : 'dsm-qa-main'}>
       <div className="dsm-qa-main-head">
-        <span className="dsm-qa-main-title">需要关注的会话</span>
+        <span className="dsm-qa-main-title">进行中的会话</span>
         <span className="dsm-qa-main-count">{groups.count > 0 ? `${groups.count} 个` : '暂无'}</span>
         {!compact && dsmOpenQuickAccessTab && (
           <button
@@ -627,7 +629,7 @@ function DsmQuickAccessPanel({ compact = false } = {}) {
         type="text"
         value={query}
         placeholder="筛选（标题 / 状态）"
-        aria-label="筛选需要关注的会话"
+        aria-label="筛选进行中的会话"
         onChange={(e) => setQuery(e.target.value)}
       />
       {jumpErr && <div className="dtl-note dsm-qa-err">{jumpErr}</div>}
@@ -641,9 +643,22 @@ function DsmQuickAccessPanel({ compact = false } = {}) {
           <div key={key} className="dsm-qa-group">
             <div className="dsm-qa-group-t"><span className="dsm-qa-dot" style={{ background: color }} />{label}（{list.length}）</div>
             {list.map((row) => (
-              <button key={row.sessionId} type="button" className="dsm-qa-row" title={(row.title || row.sessionId) + '（点击跳转）'} onClick={() => jump(row)}>
+              <button
+                key={row.sessionId}
+                type="button"
+                className="dsm-qa-row"
+                title={(row.title || row.sessionId)
+                  + (row.subagentCount ? `（含 ${row.subagentCount} 个子代理，已折叠）` : '')
+                  + '（点击跳转）'}
+                onClick={() => jump(row)}
+              >
                 <span className="dsm-qa-dot" style={{ background: color }} />
                 <span className="dsm-qa-row-t">{row.title || shortId(row.sessionId)}</span>
+                {row.subagentCount > 0 && (
+                  <span className="dsm-qa-kids" title={`${row.subagentCount} 个子代理已折叠在父会话下`}>
+                    ▸ {row.subagentCount} 子代理
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -5111,6 +5126,30 @@ export function apply(ctx) {
       ),
     )
   } catch (e) { /* 旧宿主无 panellist/main slot 时静默 */ }
+  // v0.4.2（任务3）：**对外暴露会话跳转能力**——供其他插件（典型场景：
+  // dsh-netease-lyrics 的「会话区提示」点击跳转）复用。稳定契约：
+  //   window.__dshSessionsManager = { version, openSession(id) -> boolean }
+  // openSession 走本插件已验证的双核心桥（旧核心 sessions.open / 新核心
+  // uiWorkspace.openSession），因此调用方无需自己处理宿主差异。
+  // 同一能力也尝试注册为客户端 cordis 服务 'lyinSessions'（可用则用）。
+  try {
+    const api = {
+      version: '0.4.2',
+      openSession(id) {
+        const target = id === null || id === undefined ? '' : String(id)
+        if (!target) return false
+        try {
+          const svc = dsmSessionsService()
+          if (!svc || typeof svc.open !== 'function') return false
+          svc.open(target)
+          return true
+        } catch (e) { return false }
+      },
+    }
+    if (typeof window !== 'undefined') window.__dshSessionsManager = api
+    dsmDebugLog('api:exposed', 'openSession=' + typeof api.openSession)
+  } catch (e) { dsmDebugLog('api:expose-failed', String((e && e.message) || e)) }
+
   // v0.4.0：接入 uiSession 权威状态（客户端服务，覆盖全部会话）。用 ctx.inject
   // 等待就绪（与 v0.3.4 同一教训：直接 ctx.get 会拿到 undefined）。拿不到就
   // 保持 null，面板自动回退 DOM 采集，行为不退化。
@@ -5156,12 +5195,12 @@ export function apply(ctx) {
         id: RAIL_ID,
         kind: RAIL_KIND,
         priority: 'extension',
-        title: () => '需要关注',
+        title: () => '进行中的会话',
         // guide 卡片（右栏空态列表的条目；点击直接 open(entry.kind)）。
         guide: [{
           id: 'attention',
           order: 25,
-          title: () => '需要关注',
+          title: () => '进行中的会话',
           description: () => '运行中 / 待处理 / 出错 / 刚完成的会话',
           icon: ({ size = 26, className } = {}) => (
             <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" className={className} aria-hidden="true">
@@ -5182,7 +5221,7 @@ export function apply(ctx) {
       scope.slots.inject('sidebar.right.pane.tab.title', () =>
         scope.slots.register(
           { name: 'sidebar.right.pane.tab.title', key: RAIL_ID },
-          () => <span>需要关注</span>,
+          () => <span>进行中的会话</span>,
         ),
       )
       dsmOpenQuickAccessTab = (sessionId) => {

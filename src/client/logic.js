@@ -146,6 +146,58 @@ export function stateFromSessionStatus(status, { manualUnread = false, turnKind 
   return null
 }
 
+// —— v0.4.1（任务2）：子代理折叠（纯函数，可测）————
+// 子代理会话（origin==='subagent' 且带 parentSession）也在运行状态里，面板若
+// 直接平铺就会出现多行同名会话。DSH 侧栏的语义是「子代理挂在父行徽标上」，
+// 这里对齐：顶层只留父行（父不在关注态时合成一行），子代理计成 subagentCount。
+// lineage 支持 Map 或普通对象；titleOf 用于给合成父行取标题（缺省空串）。
+export const QA_STATE_RANK = { manual: 5, error: 4, feedback: 3, running: 2, done: 1 }
+
+export function foldSubagentRows(rows, lineage, titleOf) {
+  const list = Array.isArray(rows) ? rows : []
+  if (!list.length) return list
+  const lookup = (id) => {
+    if (!lineage) return null
+    if (typeof lineage.get === 'function') return lineage.get(id) || null
+    return lineage[id] || null
+  }
+  const top = []
+  const kidsOf = new Map()
+  for (const row of list) {
+    if (!row || row.sessionId == null) continue
+    const info = lookup(String(row.sessionId))
+    const parent = info && info.origin === 'subagent' && info.parentSession
+      ? String(info.parentSession)
+      : null
+    if (parent && parent !== String(row.sessionId)) {
+      if (!kidsOf.has(parent)) kidsOf.set(parent, [])
+      kidsOf.get(parent).push(row)
+    } else {
+      top.push(row)
+    }
+  }
+  if (!kidsOf.size) return list
+  for (const [parentId, kids] of kidsOf) {
+    let parentRow = null
+    for (const r of top) if (String(r.sessionId) === parentId) { parentRow = r; break }
+    if (!parentRow) {
+      let best = null
+      for (const k of kids) {
+        if (best === null || (QA_STATE_RANK[k.state] || 0) > (QA_STATE_RANK[best] || 0)) best = k.state
+      }
+      parentRow = {
+        sessionId: parentId,
+        state: best || 'running',
+        title: typeof titleOf === 'function' ? (titleOf(parentId) || '') : '',
+        synthetic: true,
+      }
+      top.push(parentRow)
+    }
+    parentRow.subagentCount = (parentRow.subagentCount || 0) + kids.length
+  }
+  return top
+}
+
 // —— v0.2 快捷访问：把侧栏 adapter 采集到的状态行按关注类型分组 ————
 // 输入行形状 { sessionId, state, title }（state 为 dotStateFor 的逻辑态：
 // running / feedback / error / done / manual / null）。
