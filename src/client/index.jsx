@@ -5024,44 +5024,38 @@ export function apply(ctx) {
       ),
     )
   } catch (e) { /* 旧宿主无 panellist/main slot 时静默 */ }
-  // v0.3.1：右侧栏标签页——**按真实源码契约重写**。
-  // 上一版用了不存在的 `sidebarRightTabs.define`，所以什么都没注册（用户实测
-  // 看不到任何变化）。app.asar 里 @deepseek-ai/dsh-client-ui-sidebar-right
-  // 的真实 API：
-  //   ctx.sidebarRight.tabs.register({ id, kind, priority, title(address) })
-  //   ctx.sidebarRight.openTabIn(sessionId, kind, options)
-  // 必填：id 全局唯一、kind 未被占用、title 为函数（每次调用取最新文案）。
+  // v0.3.4：右侧栏标签页——**根因修复：用 ctx.inject 等待服务就绪**。
+  // 诊断日志实证（~/.dsh/sessions-manager/debug.log）：
+  //   rail:probe sr=false tabsReg=false registry=false
+  // 即 apply 执行时 sidebarRight / sidebarRightTabs 尚未提供，`ctx.get(...)`
+  // 拿到 undefined，整块注册被跳过 → body slot 从未注册 → 点击标签页只能看到
+  // shell 的 tab.unavailable 兜底（卡片时有时无 = 时序竞态）。
+  // cordis 的正确姿势是 ctx.inject([...], scope => ...)（真实插件 ui-chat /
+  // ui-sidebar-browser 一律如此），依赖就绪后才执行注册。
   try {
     const RAIL_KIND = 'dsm-quick-access'
     const RAIL_ID = 'dsm-lyin-sessions-manager/quick-access'
-    // 实证服务名（app.asar:5599-5600）：
-    //   ctx.reflect.provide("sidebarRightTabs", tabs)   ← 注册表，直接有 register
-    //   ctx.reflect.provide("sidebarRight", controller) ← 控制器，有 openTabIn
-    const sr = ctx.get && ctx.get('sidebarRight')
-    const tabsReg = ctx.get && ctx.get('sidebarRightTabs')
-    const registry = (tabsReg && typeof tabsReg.register === 'function')
-      ? tabsReg
-      : (sr && sr.tabs && typeof sr.tabs.register === 'function' ? sr.tabs : null)
-    dsmDebugLog('rail:probe', 'sr=' + !!sr, 'tabsReg=' + !!tabsReg, 'registry=' + !!registry,
-      'srKeys=' + (sr ? Object.keys(sr).slice(0, 24).join(',') : '-'),
-      'tabsRegKeys=' + (tabsReg ? Object.keys(tabsReg).slice(0, 24).join(',') : '-'))
-    if (registry && typeof registry.register === 'function') {
-      registry.register({
+    ctx.inject(['sidebarRightTabs'], (scope) => {
+      const tabs = scope.sidebarRightTabs
+      // sidebarRight 只用于「打开标签页」入口，拿不到也不影响注册，故不进 inject
+      // 列表（少一个硬依赖，旧宿主也能注册）。
+      const sr = scope.get ? scope.get('sidebarRight') : null
+      dsmDebugLog('rail:probe2', 'tabs=' + !!tabs, 'sr=' + !!sr)
+      if (!tabs || typeof tabs.register !== 'function') {
+        dsmDebugLog('rail:no-tabs-registry')
+        return
+      }
+      tabs.register({
         id: RAIL_ID,
         kind: RAIL_KIND,
         priority: 'extension',
         title: () => '需要关注',
-        // v0.3.2：guide 卡片——**这是右栏空态列表（截图里「工作区文件/新建终端/
-        // 浏览器/更多工具」那一屏）的条目来源**。实证（sidebar-right:5059）：
-        // guideEntries 由各定义的 guide 数组展开而来；卡片点击走
-        // open(entry.kind) 直接开标签页，**不经过 shortcut**（commandId 仅用于
-        // 显示快捷键提示，可省略）。缺了这个数组 = 注册了但永远没有入口。
+        // guide 卡片（右栏空态列表的条目；点击直接 open(entry.kind)）。
         guide: [{
           id: 'attention',
           order: 25,
           title: () => '需要关注',
           description: () => '运行中 / 待处理 / 出错 / 刚完成的会话',
-          // EntryBox 以 <Icon size className /> 渲染（可省略，省略时用默认方块）。
           icon: ({ size = 26, className } = {}) => (
             <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" className={className} aria-hidden="true">
               <circle cx="8" cy="8" r="2.2" />
@@ -5071,14 +5065,15 @@ export function apply(ctx) {
         }],
       })
       dsmDebugLog('rail:register-ok', RAIL_ID, RAIL_KIND)
-      try { ctx.slots.inject('sidebar.right.pane.tab', () =>
-        ctx.slots.register(
+      // keyed slot 以 definition 的 **id** 分发（app.asar:1597 entryKey）。
+      scope.slots.inject('sidebar.right.pane.tab', () =>
+        scope.slots.register(
           { name: 'sidebar.right.pane.tab', key: RAIL_ID },
           () => <DsmQuickAccessPanel compact />,
         ),
-      ); dsmDebugLog('rail:body-slot-ok') } catch (eB) { dsmDebugLog('rail:body-slot-ERR', String((eB && eB.message) || eB)) }
-      ctx.slots.inject('sidebar.right.pane.tab.title', () =>
-        ctx.slots.register(
+      )
+      scope.slots.inject('sidebar.right.pane.tab.title', () =>
+        scope.slots.register(
           { name: 'sidebar.right.pane.tab.title', key: RAIL_ID },
           () => <span>需要关注</span>,
         ),
@@ -5086,13 +5081,14 @@ export function apply(ctx) {
       dsmOpenQuickAccessTab = (sessionId) => {
         try {
           const target = sessionId || (dsmCurrentActiveId && dsmCurrentActiveId()) || ''
-          if (sr && typeof sr.openTabIn === 'function' && target) {
-            sr.openTabIn(String(target), RAIL_KIND)
+          const ctl = sr || (scope.get ? scope.get('sidebarRight') : null)
+          if (ctl && typeof ctl.openTabIn === 'function' && target) {
+            ctl.openTabIn(String(target), RAIL_KIND)
             return true
           }
         } catch (e) { /* 打开失败：退化为全局面板入口 */ }
         return false
       }
-    }
+    })
   } catch (e) { dsmDebugLog('rail:FATAL', String((e && e.message) || e)) }
 }
