@@ -11,7 +11,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { aliveSessionCount, applyTagFilter, ascPriority, canDropOnWorkspace, collapsedVisibleTotal, countRenderedVisible, dotStateFor, dragAutoScrollStep, effectiveTitleOf, filterShapeFromSaved, filterSnapshotOf, foldBranches, foldOrphanSubagents, foldSubagents, groupQuickAccess, noticeToastPlan, openSubagentToast, overflowPlan, pathTail, priorityOf, remainingRows, reviewOf, sessionForNodes, shortId, starredOf, tagDeleteConfirm, titleBackfillDecision, toastDurationFor, workspaceForNodes } from './logic.js'
+import { aliveSessionCount, applyTagFilter, ascPriority, canDropOnWorkspace, collapsedVisibleTotal, countRenderedVisible, dotStateFor, dragAutoScrollStep, effectiveTitleOf, filterShapeFromSaved, filterSnapshotOf, foldBranches, foldOrphanSubagents, foldSubagents, groupQuickAccess, noticeToastPlan, stateFromSessionStatus, openSubagentToast, overflowPlan, pathTail, priorityOf, remainingRows, reviewOf, sessionForNodes, shortId, starredOf, tagDeleteConfirm, titleBackfillDecision, toastDurationFor, workspaceForNodes } from './logic.js'
 
 export const inject = ['slots']
 
@@ -344,6 +344,56 @@ const quickAccessRegistry = new Map()
 // v0.2.8：本次进程内「曾进入 running」的会话集合——快捷面板据此区分
 // 「刚跑完（曾是 running，现已停）」与「一直空闲」。进入会话时删除，
 // 表示用户已经看过它的终态。
+// v0.4.0：**权威数据源切换**。翻 app.asar 发现客户端服务 `uiSession`
+// （@deepseek-ai/dsh-client-ui-session）已经维护了同一套状态：
+//   sessionStatus = { getSnapshot(), subscribe() }
+//   Map<sessionId, { running, pendingInteraction, completionUnread }>
+// 且 observeRunning() 内建「running→停止 = 完成未读」语义（正是我们手写的
+// 状态机），并覆盖**全部会话**（含折叠分组）——比 DOM 采集更准、更全，
+// 还能少掉 1 秒轮询与宿主日志解码。此处优先用它，旧宿主回退 DOM 采集。
+let dsmUiSessionStatus = null // { getSnapshot, subscribe } | null
+const dsmTitleCache = new Map() // sid → 标题（来自宿主会话列表，补 uiSession 的缺口）
+let dsmHostListAt = 0
+// 标题来源：宿主 /archived-sessions/sessions（请求路径零解码，成本低）。
+// 15 秒节流；失败则清空时间戳以便下次重试。
+function dsmEnsureHostTitles() {
+  if (Date.now() - dsmHostListAt < 15000) return
+  dsmHostListAt = Date.now()
+  try {
+    fetch('/archived-sessions/sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({}),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        const items = (data && data.items) || []
+        for (const it of items) {
+          if (it && it.sessionId != null) dsmTitleCache.set(String(it.sessionId), it.title || '')
+        }
+        if (typeof dsmRepaintDots === 'function') dsmRepaintDots()
+      })
+      .catch(() => { dsmHostListAt = 0 })
+  } catch (e) { dsmHostListAt = 0 }
+}
+// 由 uiSession 快照构造面板行。返回 null 表示「该数据源不可用」→ 调用方回退
+// 到 DOM 采集；返回数组（可能为空）表示权威结果。
+function dsmRowsFromUiSession() {
+  if (!dsmUiSessionStatus) return null
+  let snap = null
+  try { snap = dsmUiSessionStatus.getSnapshot() } catch (e) { return null }
+  if (!snap || typeof snap.forEach !== 'function') return null
+  const manual = dsmLoadManual()
+  const out = []
+  snap.forEach((st, sid) => {
+    const id = String(sid)
+    const state = stateFromSessionStatus(st, { manualUnread: manual.has(id), turnKind: dsmTurnKind.get(id) })
+    if (!state) return
+    out.push({ sessionId: id, state, title: dsmTitleCache.get(id) || '' })
+  })
+  return out
+}
+
 const dsmRunSeen = new Set()
 // v0.3.3 诊断通道：把关键步骤 POST 到宿主 /archived-sessions/debug-log，
 // 落盘到 ~/.dsh/sessions-manager/debug.log（GUI 无 console 时的排障手段）。
@@ -509,17 +559,36 @@ function DsmQuickAccessPanel({ compact = false } = {}) {
   const [jumpErr, setJumpErr] = React.useState('')
   const [query, setQuery] = React.useState('')
   React.useEffect(() => {
-    const tick = () => {
-      setRows([...quickAccessRegistry.values()])
-      // v0.3.5：面板可见时才做「出错/刚完成」分类（惰性），且一次一批，
-      // 避免宿主为每条刚结束的会话解码整本日志、挤占模型流。
+    // v0.4.0：优先 uiSession（全量、权威），不可用时回退 DOM 采集。
+    const collect = () => {
+      const viaUi = dsmRowsFromUiSession()
+      const rows = viaUi !== null ? viaUi : [...quickAccessRegistry.values()]
+      // 「刚完成」需要判定成败（turn-kind），惰性处理：面板可见时一次一批。
       const pending = []
-      for (const [sid, kind] of dsmTurnKind.entries()) if (kind === 'pending') pending.push(sid)
+      for (const r of rows) {
+        if (r.state !== 'done') continue
+        if (dsmTurnKind.has(r.sessionId)) continue
+        dsmTurnKind.set(r.sessionId, 'pending')
+        pending.push(r.sessionId)
+      }
+      for (const [sid, kind] of dsmTurnKind.entries()) {
+        if (kind === 'pending' && !pending.includes(sid)) pending.push(sid)
+      }
       if (pending.length) dsmFetchTurnKindBatch(pending)
+      return rows
+    }
+    const tick = () => {
+      dsmEnsureHostTitles() // 标题补齐（15s 节流）
+      setRows(collect())
     }
     tick()
     const timer = window.setInterval(tick, 1000)
-    return () => window.clearInterval(timer)
+    // uiSession 是响应式 store：状态一变立刻刷新（不必等下一拍）。
+    let unsub = null
+    if (dsmUiSessionStatus && typeof dsmUiSessionStatus.subscribe === 'function') {
+      try { unsub = dsmUiSessionStatus.subscribe(() => setRows(collect())) } catch (e) { unsub = null }
+    }
+    return () => { window.clearInterval(timer); if (typeof unsub === 'function') unsub() }
   }, [])
   const groups = React.useMemo(() => groupQuickAccess(rows), [rows])
   const needle = query.trim().toLocaleLowerCase()
@@ -562,7 +631,7 @@ function DsmQuickAccessPanel({ compact = false } = {}) {
         onChange={(e) => setQuery(e.target.value)}
       />
       {jumpErr && <div className="dtl-note dsm-qa-err">{jumpErr}</div>}
-      {groups.count === 0 && <div className="dtl-note">暂无进行中 / 待处理 / 出错 / 刚完成的会话。折叠分组里的会话要展开后才会出现在这里。</div>}
+      {groups.count === 0 && <div className="dtl-note">暂无进行中 / 待处理 / 出错 / 刚完成的会话。{dsmUiSessionStatus ? '' : '（折叠分组里的会话要展开后才会出现在这里）'}</div>}
       {QA_GROUP_META.map(({ key, label, color }) => {
         let list = groups[key]
         if (!list || !list.length) return null
@@ -5042,6 +5111,26 @@ export function apply(ctx) {
       ),
     )
   } catch (e) { /* 旧宿主无 panellist/main slot 时静默 */ }
+  // v0.4.0：接入 uiSession 权威状态（客户端服务，覆盖全部会话）。用 ctx.inject
+  // 等待就绪（与 v0.3.4 同一教训：直接 ctx.get 会拿到 undefined）。拿不到就
+  // 保持 null，面板自动回退 DOM 采集，行为不退化。
+  try {
+    ctx.inject(['uiSession'], (scope) => {
+      const svc = scope.uiSession
+      const store = svc && svc.sessionStatus
+      dsmDebugLog('uiSession:probe', 'svc=' + !!svc, 'store=' + !!store,
+        'keys=' + (svc ? Object.keys(svc).slice(0, 20).join(',') : '-'))
+      if (!store || typeof store.getSnapshot !== 'function') return
+      dsmUiSessionStatus = store
+      if (typeof store.subscribe === 'function') {
+        scope.effect(() => store.subscribe(() => {
+          if (typeof dsmRepaintDots === 'function') dsmRepaintDots()
+        }))
+      }
+      dsmDebugLog('uiSession:ready')
+    })
+  } catch (e) { dsmDebugLog('uiSession:FATAL', String((e && e.message) || e)) }
+
   // v0.3.4：右侧栏标签页——**根因修复：用 ctx.inject 等待服务就绪**。
   // 诊断日志实证（~/.dsh/sessions-manager/debug.log）：
   //   rail:probe sr=false tabsReg=false registry=false

@@ -1,4 +1,4 @@
-// dsh-lyin-sessions-manager — client 纯判定逻辑。
+﻿// dsh-lyin-sessions-manager — client 纯判定逻辑。
 //
 // 侧栏增强里最容易随 DSH 上游变化出回归的三块判定抽到这里：
 // 状态点语义、拖拽可放置校验、fiber node → 会话/工作区识别。
@@ -121,6 +121,29 @@ export function ascPriority(a, b) {
   if (d) return d
   // 宽容行（null/缺字段）：同优先级组内按创建时间新者在前；null 行按 0。
   return Number((b && b.createdAt) || 0) - Number((a && a.createdAt) || 0)
+}
+
+// —— v0.4.0：uiSession 状态 → 快捷面板状态（纯函数，可测）————
+// DSH 客户端服务 `uiSession` 的 sessionStatus 条目形状：
+//   { running, pendingInteraction, completionUnread }
+// 映射规则（与面板四组一一对应）：
+//   manualUnread（插件自有标记，最高优先）→ 'manual'
+//   pendingInteraction（审批/计划审阅/提问）→ 'feedback'
+//   running → 'running'
+//   completionUnread（跑完但未读）→ turnKind 为失败类则 'error'，否则 'done'
+//   其余 → null（不进面板）
+// turnKind 来自宿主 /archived-sessions/turn-kind 的 turn/end reason.kind
+// （实测取值：completed / error / aborted / interrupted / max-tokens）。
+export function stateFromSessionStatus(status, { manualUnread = false, turnKind = null } = {}) {
+  if (manualUnread) return 'manual'
+  if (!status || typeof status !== 'object') return null
+  if (status.pendingInteraction) return 'feedback'
+  if (status.running) return 'running'
+  if (status.completionUnread) {
+    if (turnKind === 'error' || turnKind === 'aborted' || turnKind === 'interrupted') return 'error'
+    return 'done'
+  }
+  return null
 }
 
 // —— v0.2 快捷访问：把侧栏 adapter 采集到的状态行按关注类型分组 ————
