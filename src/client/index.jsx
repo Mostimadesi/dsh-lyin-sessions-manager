@@ -11,7 +11,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { aliveSessionCount, applyTagFilter, ascPriority, canDropOnWorkspace, collapsedVisibleTotal, countRenderedVisible, dotStateFor, dragAutoScrollStep, effectiveTitleOf, filterShapeFromSaved, filterSnapshotOf, foldActivityItems, foldBranches, foldOrphanSubagents, foldSubagentRows, foldSubagents, groupQuickAccess, markedRows, mergeActivityItems, noticeToastPlan, QA_RECENT_WINDOW_MS, recentActiveRows, stateFromSessionStatus, summaryCounts, openSubagentToast, overflowPlan, pathTail, priorityOf, remainingRows, reviewOf, sessionForNodes, shortId, starredOf, tagDeleteConfirm, titleBackfillDecision, toastDurationFor, workspaceForNodes } from './logic.js'
+import { aliveSessionCount, applyTagFilter, ascPriority, canDropOnWorkspace, collapsedVisibleTotal, countRenderedVisible, dotStateFor, dragAutoScrollStep, effectiveTitleOf, filterShapeFromSaved, filterSnapshotOf, foldActivityItems, foldBranches, foldOrphanSubagents, foldSubagentRows, foldSubagents, groupQuickAccess, markedRows, mergeActivityItems, normalizeCollapsed, noticeToastPlan, QA_RECENT_WINDOW_MS, recentActiveRows, stateFromSessionStatus, summaryCounts, openSubagentToast, overflowPlan, pathTail, priorityOf, remainingRows, reviewOf, sessionForNodes, shortId, starredOf, tagDeleteConfirm, titleBackfillDecision, toastDurationFor, workspaceForNodes } from './logic.js'
 
 export const inject = ['slots']
 
@@ -200,6 +200,15 @@ body[data-ds-dark-theme] .archv{color-scheme:dark}
 .dsm-qa-rail .dsm-qa-row{padding:6px 8px;font-size:12.5px;gap:8px}
 .dsm-qa-rail .dsm-qa-group{margin-top:8px}
 .dsm-qa-rail .dsm-qa-group-t{font-size:10.5px;opacity:.6;margin-bottom:4px}
+/* v0.5.4 吸顶标题条：标题 + 摘要条固定在滚动容器顶部。负外边距让吸顶条铺满面板
+   内边距——否则内容会从两侧和上方的空隙里露出来。底色优先用 dsmFitPanel 实测到的
+   宿主页面底色（--dsmqa-head-bg），测不到时退回当前外观预设的不透明色。 */
+.dsm-qa-sticky{position:sticky;top:0;z-index:3;background:var(--dsmqa-head-bg,var(--dsmqa-solid,#18181A));margin:-18px -22px 0;padding:18px 22px 0}
+.dsm-qa-rail .dsm-qa-sticky{margin:-10px -12px 0;padding:10px 12px 0}
+/* v0.5.4 分组可收起（替代「按上限截断」）：表头即开关，收起后只留标题与计数。 */
+.dsm-qa-fold{width:100%;box-sizing:border-box;background:0 0;border:0;padding:2px 0;color:inherit;font:inherit;cursor:pointer;text-align:left}
+.dsm-qa-fold:hover{opacity:.95}
+.dsm-qa-caret{flex:none;width:9px;display:inline-block;opacity:.7}
 /* v0.2.2 外观设置滑杆（原生 range 即可，宽度对齐 mv-field）。 */
 .mv-field input[type="range"]{width:100%;accent-color:var(--dsmqa-fg,#F1EFE8)}
 .archv-body{flex:1;min-width:0;display:flex;align-items:center;gap:12px}
@@ -480,20 +489,67 @@ function dsmDebugLog(...parts) {
 
 // v0.3.0：右栏标签页的打开入口（apply 时由右栏可用性决定是否赋值）。
 let dsmOpenQuickAccessTab = null
-// 当前选中会话 id（供「在右栏打开」用）：优先宿主 uiWorkspace 快照，退回 DOM
-// 的 aria-selected 行。
-function dsmCurrentActiveId() {
+// v0.5.4：右栏 tab 的目标会话 id。
+// `sidebar.right.pane.tab` 是 `kind:"keyed", scope:"session"`——标签必须挂在**某个
+// 会话**的右栏里，所以「在右栏打开」失败的真实原因往往是「没探到当前会话 id」，
+// 而不是真的没有会话（原来的提示语会误导）。这里按
+// 「当前选中 → 面板里已有的会话」顺序取目标；右栏标签体是全局列表，挂在谁的右栏
+// 里都一样，故面板首行是合法兜底。把走过的路径一并返回，失败时落盘便于排查。
+function dsmRailTarget() {
+  const tried = []
+  const idOf = (v) => {
+    if (typeof v === 'string') return v
+    if (v && typeof v.id === 'string') return v.id
+    if (v && typeof v.sessionId === 'string') return v.sessionId
+    return ''
+  }
   try {
     const ui = dsmClientCtx && dsmClientCtx.get && dsmClientCtx.get('uiWorkspace')
     const snap = ui && typeof ui.getSnapshot === 'function' ? ui.getSnapshot() : null
-    const id = snap && (snap.current || (snap.selection && snap.selection.current))
-    if (id) return String(id)
-  } catch (e) { /* 忽略 */ }
+    if (snap) {
+      for (const path of ['current', 'activeId', 'mainId', 'selection.current', 'selection.activeId']) {
+        const v = path.split('.').reduce((o, k) => (o == null ? o : o[k]), snap)
+        const id = idOf(v)
+        if (id) return { id, via: 'uiWorkspace.' + path, tried }
+        tried.push('ws:' + path)
+      }
+    } else tried.push('ws:no-snapshot')
+  } catch (e) { tried.push('ws:err') }
   try {
-    const sel = document.querySelector('[role="treeitem"][aria-selected="true"][data-row-key^="session:"]')
-    if (sel) return String(sel.getAttribute('data-row-key')).slice('session:'.length)
-  } catch (e) { /* 忽略 */ }
-  return ''
+    const s = dsmClientCtx && dsmClientCtx.get && dsmClientCtx.get('uiSession')
+    const id = idOf(s && s.current)
+    if (id) return { id, via: 'uiSession.current', tried }
+    tried.push('us:current')
+  } catch (e) { tried.push('us:err') }
+  try {
+    const sels = [
+      '[role="treeitem"][aria-selected="true"][data-row-key^="session:"]',
+      '[data-row-key^="session:"][aria-selected="true"]',
+      '[data-session-id][aria-selected="true"]',
+      '[data-session-id][aria-current="true"]',
+    ]
+    for (const q of sels) {
+      const el = document.querySelector(q)
+      if (!el) { tried.push('dom:' + q.slice(0, 20)); continue }
+      const raw = String(el.getAttribute('data-row-key') || el.getAttribute('data-session-id') || '')
+      const id = raw.indexOf('session:') === 0 ? raw.slice('session:'.length) : raw
+      if (id) return { id, via: 'dom', tried }
+    }
+  } catch (e) { tried.push('dom:err') }
+  try {
+    const rows = dsmRowsFromUiSession() || [...quickAccessRegistry.values()]
+    const folded = foldSubagentRows(rows, dsmLineage, (id) => dsmTitleOf(id))
+    if (folded.length && folded[0] && folded[0].sessionId) {
+      return { id: String(folded[0].sessionId), via: 'panel-row', tried }
+    }
+    tried.push('panel:empty')
+    const items = dsmActivityItems()
+    if (items.length && items[0] && items[0].sessionId) {
+      return { id: String(items[0].sessionId), via: 'activity-row', tried }
+    }
+    tried.push('activity:empty')
+  } catch (e) { tried.push('panel:err') }
+  return { id: '', via: '', tried }
 }
 // v0.2.8：会话最近一次 turn/end 的 reason.kind（'completed' / 'error' /
 // 'aborted' / 'interrupted' / ...）。由 host 的 /archived-sessions/turn-kind
@@ -532,33 +588,36 @@ function dsmFetchTurnKindBatch(ids) {
 // 抹掉其他偏好）。缺省 preset = 'dark-glass'（即 v0.2.1 的原样式）。
 const QA_STYLE_KEY = 'dsm-qa-style-v1'
 
+// `--dsmqa-solid` = 同一预设的**不透明**底色，供吸顶标题条使用（半透明的 --dsmqa-bg
+// 挡不住从下面滚过的内容）。运行时若能在宿主里测到真正的页面底色，会用它覆盖
+// --dsmqa-head-bg，那时这一项只作为兜底（见 dsmFitPanel）。
 const QA_STYLE_PRESETS = {
   'dark-glass': { label: '深色玻璃（默认）', vars: {
-    '--dsmqa-bg': 'rgba(24,24,26,.86)', '--dsmqa-fg': '#F1EFE8',
+    '--dsmqa-bg': 'rgba(24,24,26,.86)', '--dsmqa-solid': '#18181A', '--dsmqa-fg': '#F1EFE8',
     '--dsmqa-border': 'rgba(127,127,127,.22)', '--dsmqa-blur': '14px',
     '--dsmqa-radius': '14px', '--dsmqa-width': '760px',
     '--dsmqa-note': 'rgba(241,239,232,.55)',
   } },
   light: { label: '浅色纸面', vars: {
-    '--dsmqa-bg': 'rgba(255,253,248,.92)', '--dsmqa-fg': '#26241F',
+    '--dsmqa-bg': 'rgba(255,253,248,.92)', '--dsmqa-solid': '#FFFDF8', '--dsmqa-fg': '#26241F',
     '--dsmqa-border': 'rgba(120,113,95,.28)', '--dsmqa-blur': '14px',
     '--dsmqa-radius': '14px', '--dsmqa-width': '760px',
     '--dsmqa-note': 'rgba(38,36,31,.55)',
   } },
   ocean: { label: '海洋（青蓝）', vars: {
-    '--dsmqa-bg': 'rgba(16,30,42,.88)', '--dsmqa-fg': '#D7ECF7',
+    '--dsmqa-bg': 'rgba(16,30,42,.88)', '--dsmqa-solid': '#101E2A', '--dsmqa-fg': '#D7ECF7',
     '--dsmqa-border': 'rgba(96,165,250,.28)', '--dsmqa-blur': '14px',
     '--dsmqa-radius': '14px', '--dsmqa-width': '760px',
     '--dsmqa-note': 'rgba(215,236,247,.55)',
   } },
   neon: { label: '霓虹（品红）', vars: {
-    '--dsmqa-bg': 'rgba(24,14,28,.88)', '--dsmqa-fg': '#F6D5FF',
+    '--dsmqa-bg': 'rgba(24,14,28,.88)', '--dsmqa-solid': '#180E1C', '--dsmqa-fg': '#F6D5FF',
     '--dsmqa-border': 'rgba(217,70,239,.35)', '--dsmqa-blur': '16px',
     '--dsmqa-radius': '16px', '--dsmqa-width': '760px',
     '--dsmqa-note': 'rgba(246,213,255,.55)',
   } },
   mono: { label: '黑白（极简）', vars: {
-    '--dsmqa-bg': 'rgba(18,18,18,.92)', '--dsmqa-fg': '#F2F2F2',
+    '--dsmqa-bg': 'rgba(18,18,18,.92)', '--dsmqa-solid': '#121212', '--dsmqa-fg': '#F2F2F2',
     '--dsmqa-border': 'rgba(255,255,255,.18)', '--dsmqa-blur': '8px',
     '--dsmqa-radius': '6px', '--dsmqa-width': '700px',
     '--dsmqa-note': 'rgba(242,242,242,.5)',
@@ -643,6 +702,56 @@ function dsmProbeScroll(el) {
   } catch (e) { /* best-effort */ }
 }
 
+// v0.5.4：分组可收起（替代「按上限截断」）。收起状态按 group key 记在
+// localStorage，刷新界面或重开面板后保持。搜索时一律展开——搜到的条目若藏在
+// 收起的组里，用户会以为「没搜到」。
+const QA_COLLAPSE_KEY = 'dsm-qa-collapsed-v1'
+function readQaCollapsed() {
+  try {
+    return normalizeCollapsed(JSON.parse(window.localStorage.getItem(QA_COLLAPSE_KEY) || '{}'))
+  } catch (e) { return {} }
+}
+function writeQaCollapsed(next) {
+  try { window.localStorage.setItem(QA_COLLAPSE_KEY, JSON.stringify(next)) } catch (e) { /* 忽略 */ }
+}
+
+// v0.5.4：让面板自己成为滚动容器——先实测宿主可用高度，再写 max-height。
+// 为什么不能只写 `max-height:100%`：panel:scroll 取证显示面板紧邻的父节点是
+// 0 高、height:auto 的 div，百分比高度对 auto 高度的父级解析为 none，等于没设；
+// 而吸顶标题条需要一个确定的滚动上下文才稳定。
+// 吸顶条底色同样不猜主题令牌：向上找第一个**真正画了底色**的祖先，用它同色，
+// 内容从下面滚过时就看不出来。两条都落盘一行，便于下次直接看数据。
+let dsmFitLogged = false
+function dsmFitPanel(el) {
+  if (!el || typeof window === 'undefined') return
+  try {
+    let anc = el.parentElement
+    while (anc && anc !== document.body && anc !== document.documentElement && anc.clientHeight <= 0) {
+      anc = anc.parentElement
+    }
+    let avail = 0
+    if (anc && anc !== document.body && anc !== document.documentElement) {
+      const ar = anc.getBoundingClientRect()
+      const offset = el.getBoundingClientRect().top - ar.top + anc.scrollTop
+      avail = Math.max(200, Math.floor(anc.clientHeight - offset - 6))
+      el.style.maxHeight = avail + 'px'
+    }
+    let cur = el.parentElement
+    let bg = ''
+    while (cur && !bg) {
+      const c = window.getComputedStyle(cur).backgroundColor
+      if (c && c !== 'transparent' && !/,\s*0(\.0+)?\)$/.test(c)) bg = c
+      cur = cur.parentElement
+    }
+    if (bg) el.style.setProperty('--dsmqa-head-bg', bg)
+    if (!dsmFitLogged) {
+      dsmFitLogged = true
+      const cls = anc ? String(anc.className || '').split(/\s+/).filter(Boolean).slice(0, 2).join('.') : ''
+      dsmDebugLog('panel:fit', `avail=${avail} anc=${anc ? anc.tagName.toLowerCase() : '-'}${cls ? '.' + cls : ''} ch=${anc ? anc.clientHeight : 0} head-bg=${bg || '(none)'}`)
+    }
+  } catch (e) { /* best-effort */ }
+}
+
 function DsmQuickAccessPanel({ compact = false } = {}) {
   // v0.5.0：view = { rows（关注区，子代理已折叠）, attentionIds（关注区**折叠前**的
   // 全部会话 id）}。attentionIds 用于把关注区已列出的会话从次级区排除——折叠掉的
@@ -651,7 +760,26 @@ function DsmQuickAccessPanel({ compact = false } = {}) {
   const rows = view.rows
   // v0.5.3：记录一次面板与宿主容器的滚动能力（见 dsmProbeScroll）。
   const rootRef = React.useRef(null)
-  React.useEffect(() => { dsmProbeScroll(rootRef.current) }, [])
+  React.useEffect(() => {
+    // v0.5.3 诊断 + v0.5.4 实测：把面板高度撑到宿主可用高度（面板自身成为滚动
+    // 容器，吸顶条才有确定上下文），并把宿主页面底色写进 --dsmqa-head-bg。
+    dsmProbeScroll(rootRef.current)
+    dsmFitPanel(rootRef.current)
+    const onResize = () => dsmFitPanel(rootRef.current)
+    window.addEventListener('resize', onResize)
+    // 面板刚插入时祖先可能还没完成布局，落定后再量一次。
+    const late = window.setTimeout(() => dsmFitPanel(rootRef.current), 1200)
+    return () => { window.removeEventListener('resize', onResize); window.clearTimeout(late) }
+  }, [])
+  // v0.5.4：分组收起状态（见 readQaCollapsed）。
+  const [collapsed, setCollapsed] = React.useState(readQaCollapsed)
+  const toggleFold = (key) => setCollapsed((cur) => {
+    const next = { ...cur }
+    if (next[key]) delete next[key]
+    else next[key] = true
+    writeQaCollapsed(next)
+    return next
+  })
   // v0.3.3 诊断：本体一旦渲染即记录（只记一次），用于判断 slot 是否命中。
   React.useEffect(() => { dsmDebugLog('rail:body-rendered', 'compact=' + !!compact) }, [compact])
   const [jumpErr, setJumpErr] = React.useState('')
@@ -698,6 +826,8 @@ function DsmQuickAccessPanel({ compact = false } = {}) {
   // v0.5.0 顶部摘要条：一行给出四组计数，列表很短时面板也不显空。
   const summary = React.useMemo(() => summaryCounts(rows), [rows])
   const needle = query.trim().toLocaleLowerCase()
+  // 收起状态：搜索时强制展开（见 QA_COLLAPSE_KEY 注释）。
+  const isFolded = (key) => !needle && !!collapsed[key]
   const matchRow = (row) => !needle
     || String(row.title || '').toLocaleLowerCase().includes(needle)
     || String(row.state || '').includes(needle)
@@ -737,17 +867,26 @@ function DsmQuickAccessPanel({ compact = false } = {}) {
     }
   }
   // 次级区共用渲染：左侧可选徽标（已标记区）→ 标题 → 工作区 → 相对时间。
+  // v0.5.4：表头改为可收起的按钮（key 形如 sec:recent / sec:marked）。
   const renderSec = (key, label, hint, shown, total) => {
     if (!shown.length) return null
     const hidden = Math.max(0, Number(total || 0) - shown.length)
+    const off = isFolded(key)
     return (
       <div key={key} className="dsm-qa-group dsm-qa-sec">
-        <div className="dsm-qa-group-t dsm-qa-sec-h">
-          <span className="dsm-qa-sec-label">{label}</span>
+        <button
+          type="button"
+          className="dsm-qa-group-t dsm-qa-sec-h dsm-qa-fold"
+          aria-expanded={!off}
+          title={off ? '展开这一组' : '收起这一组'}
+          onClick={() => toggleFold(key)}
+        >
+          <span className="dsm-qa-caret">{off ? '▸' : '▾'}</span>
+          <span className="dsm-qa-sec-label">{label}（{shown.length}）</span>
           {hint && <span className="dsm-qa-sec-hint">{hint}</span>}
           {hidden > 0 && <span className="dsm-qa-sec-hint">另有 {hidden} 个未显示</span>}
-        </div>
-        {shown.map((row) => (
+        </button>
+        {!off && shown.map((row) => (
           <button
             key={row.sessionId}
             type="button"
@@ -775,6 +914,8 @@ function DsmQuickAccessPanel({ compact = false } = {}) {
   }
   return (
     <div ref={rootRef} className={compact ? 'dsm-qa-rail' : 'dsm-qa-main'}>
+      {/* v0.5.4：标题 + 摘要条一起吸顶（底色见 .dsm-qa-sticky 与 dsmFitPanel）。 */}
+      <div className="dsm-qa-sticky">
       <div className="dsm-qa-main-head">
         <span className="dsm-qa-main-title">进行中的会话</span>
         <span className="dsm-qa-main-count">{groups.count > 0 ? `${groups.count} 个` : '暂无'}</span>
@@ -783,7 +924,14 @@ function DsmQuickAccessPanel({ compact = false } = {}) {
             type="button"
             className="archv-btn"
             title="在右侧栏打开（可与会话并列查看）"
-            onClick={() => { if (!dsmOpenQuickAccessTab()) setJumpErr('当前没有活动会话，无法在右栏打开') }}
+            onClick={() => {
+              const t = dsmRailTarget()
+              if (t.id && dsmOpenQuickAccessTab(t.id)) { setJumpErr(''); return }
+              dsmDebugLog('rail:open-fail', JSON.stringify({ id: t.id, via: t.via, tried: t.tried || [] }))
+              setJumpErr(t.id
+                ? '右栏接口不可用，已保留全局面板'
+                : '还没有可用的会话：先在左侧选中或打开一个会话再试')
+            }}
           >在右栏打开</button>
         )}
       </div>
@@ -794,6 +942,7 @@ function DsmQuickAccessPanel({ compact = false } = {}) {
           </span>
         ))}
         <span className="dsm-qa-sum-i dsm-qa-sum-all">共 {dsmMetaCache.size} 个会话</span>
+      </div>
       </div>
       <input
         className="dsm-qa-search"
@@ -810,10 +959,22 @@ function DsmQuickAccessPanel({ compact = false } = {}) {
           {!needle && !metaItems.length && (dsmUiSessionStatus ? '' : '（折叠分组里的会话要展开后才会出现在这里）')}
         </div>
       )}
-      {shownGroups.map(({ key, label, color, list }) => (
+      {shownGroups.map(({ key, label, color, list }) => {
+        const off = isFolded(key)
+        return (
         <div key={key} className="dsm-qa-group">
-          <div className="dsm-qa-group-t"><span className="dsm-qa-dot" style={{ background: color }} />{label}（{list.length}）</div>
-          {list.map((row) => (
+          <button
+            type="button"
+            className="dsm-qa-group-t dsm-qa-fold"
+            aria-expanded={!off}
+            title={off ? '展开这一组' : '收起这一组'}
+            onClick={() => toggleFold(key)}
+          >
+            <span className="dsm-qa-caret">{off ? '▸' : '▾'}</span>
+            <span className="dsm-qa-dot" style={{ background: color }} />
+            {label}（{list.length}）
+          </button>
+          {!off && list.map((row) => (
             <button
               key={row.sessionId}
               type="button"
@@ -833,12 +994,13 @@ function DsmQuickAccessPanel({ compact = false } = {}) {
             </button>
           ))}
         </div>
-      ))}
+        )
+      })}
       {/* v0.5.0 次级区①：时间维度——「我刚才在忙什么」。窗口 = 宿主列表的
           updatedAt（日志 mtime），故运行中的会话也会在这里，但关注区已列出的
           一律被排除，不会与上方重复。 */}
       {renderSec(
-        'recent',
+        'sec:recent',
         '最近活跃',
         `近 ${Math.round(QA_RECENT_WINDOW_MS / 3600000)} 小时有更新`,
         recentShown,
@@ -846,7 +1008,7 @@ function DsmQuickAccessPanel({ compact = false } = {}) {
       )}
       {/* v0.5.0 次级区②：标记维度——「我自己标过要看的」（v0.1 元数据层）。 */}
       {renderSec(
-        'marked',
+        'sec:marked',
         '已标记',
         '★收藏 · 待回看 · P1-P2',
         markedShown,
@@ -5426,7 +5588,7 @@ export function apply(ctx) {
       )
       dsmOpenQuickAccessTab = (sessionId) => {
         try {
-          const target = sessionId || (dsmCurrentActiveId && dsmCurrentActiveId()) || ''
+          const target = sessionId || dsmRailTarget().id || ''
           const ctl = sr || (scope.get ? scope.get('sidebarRight') : null)
           if (ctl && typeof ctl.openTabIn === 'function' && target) {
             ctl.openTabIn(String(target), RAIL_KIND)

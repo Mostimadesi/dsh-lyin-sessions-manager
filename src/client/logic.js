@@ -999,3 +999,15 @@ export function markedRows(items, { now = Date.now(), limit = QA_SECTION_LIMIT, 
     total: list.length,
   }
 }
+
+// v0.5.4：分组收起状态的清洗——localStorage 里什么都有可能（旧版本写的、手改的、
+// null、数组、嵌套对象），面板只认 `{ key: true }` 这一种形状，避免脏值让某组
+// 永远打不开或永远展开不了。
+export function normalizeCollapsed(input) {
+  const out = {}
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return out
+  for (const k of Object.keys(input)) {
+    if (typeof k === 'string' && k && input[k]) out[k] = true
+  }
+  return out
+}

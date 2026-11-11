@@ -10,6 +10,7 @@ import {
   markBadges,
   markedRows,
   mergeActivityItems,
+  normalizeCollapsed,
   QA_RECENT_LIMIT,
   QA_SECTION_LIMIT,
   recentActiveRows,
@@ -292,4 +293,20 @@ test('折叠接入次级区：只出现父行，子代理的标记随父行进�
   assert.deepEqual(markedAll.rows.map((r) => r.sessionId), ['p'])
   assert.deepEqual(markedAll.rows[0].badges, ['P1'])
   assert.equal(markedAll.rows[0].subagentCount, 1)
+})
+
+// —— v0.5.4 分组收起 ——————————————————————————————————————————————
+
+test('收起状态清洗：只认 { key: true }，脏值一律回空对象', () => {
+  assert.deepEqual(normalizeCollapsed({ running: true, error: false, 'sec:recent': 1 }), {
+    running: true,
+    'sec:recent': true,
+  }, '真值归一为 true，假值直接丢掉')
+  assert.deepEqual(normalizeCollapsed(null), {})
+  assert.deepEqual(normalizeCollapsed(undefined), {})
+  assert.deepEqual(normalizeCollapsed('running'), {}, '字符串不是映射')
+  assert.deepEqual(normalizeCollapsed(['running']), {}, '数组不是映射')
+  assert.deepEqual(normalizeCollapsed({ '': true }), {}, '空 key 丢掉')
+  const out = normalizeCollapsed(JSON.parse('{"done":true}'))
+  assert.deepEqual(out, { done: true }, 'localStorage 往返后仍可用')
 })
