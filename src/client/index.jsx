@@ -1,4 +1,4 @@
-﻿/**
+/**
  * dsh-lyin-sessions-manager — browser half: renders a single "会话管理" settings
  * section (settings.section list slot) that unifies archived-session
  * management and cross-workspace moving. It talks to the host half's
@@ -11,7 +11,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { aliveSessionCount, applyTagFilter, ascPriority, canDropOnWorkspace, collapsedVisibleTotal, countRenderedVisible, dotStateFor, dragAutoScrollStep, effectiveTitleOf, filterShapeFromSaved, filterSnapshotOf, foldBranches, foldOrphanSubagents, foldSubagentRows, foldSubagents, groupQuickAccess, noticeToastPlan, stateFromSessionStatus, openSubagentToast, overflowPlan, pathTail, priorityOf, remainingRows, reviewOf, sessionForNodes, shortId, starredOf, tagDeleteConfirm, titleBackfillDecision, toastDurationFor, workspaceForNodes } from './logic.js'
+import { aliveSessionCount, applyTagFilter, ascPriority, canDropOnWorkspace, collapsedVisibleTotal, countRenderedVisible, dotStateFor, dragAutoScrollStep, effectiveTitleOf, filterShapeFromSaved, filterSnapshotOf, foldBranches, foldOrphanSubagents, foldSubagentRows, foldSubagents, groupQuickAccess, markedRows, mergeActivityItems, noticeToastPlan, QA_RECENT_WINDOW_MS, recentActiveRows, stateFromSessionStatus, summaryCounts, openSubagentToast, overflowPlan, pathTail, priorityOf, remainingRows, reviewOf, sessionForNodes, shortId, starredOf, tagDeleteConfirm, titleBackfillDecision, toastDurationFor, workspaceForNodes } from './logic.js'
 
 export const inject = ['slots']
 
@@ -156,6 +156,26 @@ body[data-ds-dark-theme] .archv{color-scheme:dark}
 .dsm-qa-row-t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dsm-qa-kids{flex:none;font-size:10.5px;line-height:1;padding:3px 6px;border-radius:999px;border:1px solid rgba(127,127,127,.3);opacity:.75;white-space:nowrap}
 .dsm-qa-err{color:#F87171}
+/* v0.5.0 顶部摘要条：一行四组计数，列表很短时面板也不显空。 */
+.dsm-qa-sum{display:flex;flex-wrap:wrap;align-items:center;gap:4px 14px;margin:-4px 0 12px;padding-bottom:9px;border-bottom:1px solid rgba(127,127,127,.16);font-size:11.5px}
+.dsm-qa-sum-i{display:inline-flex;align-items:center;gap:6px;opacity:.45;white-space:nowrap}
+.dsm-qa-sum-i .dsm-qa-dot{width:6px;height:6px;opacity:.85}
+.dsm-qa-sum-on{opacity:.92}
+.dsm-qa-sum-all{margin-left:auto;opacity:.4}
+/* v0.5.0 次级区（最近活跃 / 已标记）。与上方关注区同构，但用细分隔线区分层次。 */
+.dsm-qa-sec{margin-top:14px;padding-top:11px;border-top:1px solid rgba(127,127,127,.13)}
+.dsm-qa-sec-h{text-transform:none;letter-spacing:0;gap:8px}
+.dsm-qa-sec-label{font-weight:600;opacity:.85;letter-spacing:.2px}
+.dsm-qa-sec-hint{opacity:.45;font-weight:400;font-size:10.5px}
+.dsm-qa-badge{flex:none;font-size:10px;line-height:1;padding:3px 5px;border-radius:5px;border:1px solid rgba(127,127,127,.32);opacity:.8;white-space:nowrap}
+.dsm-qa-ws{flex:none;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;opacity:.45}
+.dsm-qa-ago{margin-left:auto;flex:none;font-size:11px;opacity:.5;white-space:nowrap}
+.dsm-qa-rail .dsm-qa-sum{gap:3px 10px;margin-bottom:9px;padding-bottom:7px;font-size:10.5px}
+.dsm-qa-rail .dsm-qa-sum-all{margin-left:0}
+.dsm-qa-rail .dsm-qa-sec{margin-top:10px;padding-top:8px}
+.dsm-qa-rail .dsm-qa-sec-hint{font-size:10px}
+.dsm-qa-rail .dsm-qa-ws{max-width:80px}
+.dsm-qa-rail .dsm-qa-ago{font-size:10.5px}
 /* v0.2.1 内联状态点：显示在会话名称左侧（paint 循环注入）。 */
 .dsm-inline-dot{width:7px;height:7px;border-radius:50%;flex:none;display:inline-block;margin-right:7px;vertical-align:middle;box-shadow:0 0 4px rgba(0,0,0,.25)}
 .dsm-inline-dot-wrap{display:inline-flex;align-items:center;min-width:0}
@@ -353,9 +373,23 @@ const quickAccessRegistry = new Map()
 // 状态机），并覆盖**全部会话**（含折叠分组）——比 DOM 采集更准、更全，
 // 还能少掉 1 秒轮询与宿主日志解码。此处优先用它，旧宿主回退 DOM 采集。
 let dsmUiSessionStatus = null // { getSnapshot, subscribe } | null
-const dsmTitleCache = new Map() // sid → 标题（来自宿主会话列表，补 uiSession 的缺口）
+// v0.5.1：客户端会话商店 `uiSession.sessions.list`（快照 {phase, ids, byId}）。
+// **本机唯一可靠的「最后活动时间」来源**——实证（~/.dsh/sessions-manager/debug.log）：
+//   store:probe phase=ready ids=455 row={id,displayTitle,running,retainedBy,blank,
+//               updatedAt,formatStatus,projectionValues,title,cwd} updatedAt=1794358791738
+// 而宿主 /archived-sessions/sessions 在 SessionHandle 世代恒无 updatedAt
+// （host-list:probe items=455 withUpdatedAt=0，根因见 src/index.js:593 提前 return）。
+// 核心侧栏行显示「5 分钟前」用的就是这个数值型 updatedAt（epoch ms）。
+let dsmSessionListStore = null
+// v0.5.0：由「只存标题」升级为**整行缓存**（sid → 宿主列表条目）。标题仍取
+// it.title（补 uiSession 的缺口），新增的 updatedAt / starred / priority /
+// review / workspaceTitle 供面板次级区（最近活跃 / 已标记）使用——同一份载荷，
+// 零额外请求。上限 = 会话数（数百量级），不额外裁剪。
+const dsmMetaCache = new Map()
+const dsmTitleOf = (id) => (dsmMetaCache.get(String(id)) || {}).title || ''
 let dsmHostListAt = 0
-// 标题来源：宿主 /archived-sessions/sessions（请求路径零解码，成本低）。
+let dsmHostListLogged = false
+// 列表来源：宿主 /archived-sessions/sessions（请求路径零解码，成本低）。
 // 15 秒节流；失败则清空时间戳以便下次重试。
 function dsmEnsureHostTitles() {
   if (Date.now() - dsmHostListAt < 15000) return
@@ -370,7 +404,15 @@ function dsmEnsureHostTitles() {
       .then((data) => {
         const items = (data && data.items) || []
         for (const it of items) {
-          if (it && it.sessionId != null) dsmTitleCache.set(String(it.sessionId), it.title || '')
+          if (it && it.sessionId != null) dsmMetaCache.set(String(it.sessionId), it)
+        }
+        if (!dsmHostListLogged) {
+          dsmHostListLogged = true
+          const ups = items.map((it) => it && it.updatedAt).filter((v) => typeof v === 'number')
+          dsmDebugLog('host-list:loaded',
+            'items=' + items.length,
+            'withUpdatedAt=' + ups.length,
+            'keys=' + JSON.stringify(Object.keys(items[0] || {})))
         }
         if (typeof dsmRepaintDots === 'function') dsmRepaintDots()
       })
@@ -390,9 +432,30 @@ function dsmRowsFromUiSession() {
     const id = String(sid)
     const state = stateFromSessionStatus(st, { manualUnread: manual.has(id), turnKind: dsmTurnKind.get(id) })
     if (!state) return
-    out.push({ sessionId: id, state, title: dsmTitleCache.get(id) || '' })
+    out.push({ sessionId: id, state, title: dsmTitleOf(id) })
   })
   return out
+}
+
+// v0.5.1：次级区（最近活跃 / 已标记）的数据行。以**客户端会话商店**为主——
+// 它是本机唯一带「最后活动时间」的来源；标题优先取商店行（displayTitle/title，
+// 与核心侧栏显示一致），标注字段（starred/priority/review/tags）与工作区名仍取自
+// 宿主载荷 dsmMetaCache；商店不可用时整体退回宿主载荷（旧宿主可能自带 updatedAt）。
+function dsmActivityItems() {
+  let snap = null
+  try { snap = dsmSessionListStore ? dsmSessionListStore.getSnapshot() : null } catch (e) { snap = null }
+  if (snap && snap.byId) {
+    const ids = Array.isArray(snap.ids) ? snap.ids : Object.keys(snap.byId)
+    const storeRows = []
+    for (const rawId of ids) {
+      const row = snap.byId[rawId]
+      if (!row) continue
+      storeRows.push({ ...row, id: row.id != null ? row.id : rawId })
+    }
+    // 合成逻辑是纯函数（logic.mergeActivityItems），此处只负责取快照。
+    return mergeActivityItems(storeRows, dsmMetaCache)
+  }
+  return [...dsmMetaCache.values()].map((it) => ({ ...it, sessionId: String(it.sessionId) }))
 }
 
 const dsmRunSeen = new Set()
@@ -554,7 +617,11 @@ const QA_GROUP_META = [
 // 标签页（sidebar.right.pane.tab，窄布局）。compact=true 时去掉大标题与
 // 内边距，适配右栏 ~320px 宽度。
 function DsmQuickAccessPanel({ compact = false } = {}) {
-  const [rows, setRows] = React.useState([])
+  // v0.5.0：view = { rows（关注区，子代理已折叠）, attentionIds（关注区**折叠前**的
+  // 全部会话 id）}。attentionIds 用于把关注区已列出的会话从次级区排除——折叠掉的
+  // 子代理也算「已在上方出现」，否则它们会用自己的名字出现在「最近活跃」里。
+  const [view, setView] = React.useState({ rows: [], attentionIds: new Set() })
+  const rows = view.rows
   // v0.3.3 诊断：本体一旦渲染即记录（只记一次），用于判断 slot 是否命中。
   React.useEffect(() => { dsmDebugLog('rail:body-rendered', 'compact=' + !!compact) }, [compact])
   const [jumpErr, setJumpErr] = React.useState('')
@@ -577,23 +644,49 @@ function DsmQuickAccessPanel({ compact = false } = {}) {
         if (kind === 'pending' && !pending.includes(sid)) pending.push(sid)
       }
       if (pending.length) dsmFetchTurnKindBatch(pending)
-      return foldSubagentRows(rows, dsmLineage, (id) => dsmTitleCache.get(id))
+      return {
+        rows: foldSubagentRows(rows, dsmLineage, (id) => dsmTitleOf(id)),
+        attentionIds: new Set(rows.map((r) => String(r.sessionId))),
+      }
     }
     const tick = () => {
-      dsmEnsureHostTitles() // 标题补齐（15s 节流）
-      setRows(collect())
+      dsmEnsureHostTitles() // 标题/元数据补齐（15s 节流）
+      setView(collect())
     }
     tick()
     const timer = window.setInterval(tick, 1000)
     // uiSession 是响应式 store：状态一变立刻刷新（不必等下一拍）。
     let unsub = null
     if (dsmUiSessionStatus && typeof dsmUiSessionStatus.subscribe === 'function') {
-      try { unsub = dsmUiSessionStatus.subscribe(() => setRows(collect())) } catch (e) { unsub = null }
+      try { unsub = dsmUiSessionStatus.subscribe(() => setView(collect())) } catch (e) { unsub = null }
     }
     return () => { window.clearInterval(timer); if (typeof unsub === 'function') unsub() }
   }, [])
   const groups = React.useMemo(() => groupQuickAccess(rows), [rows])
+  // v0.5.0 顶部摘要条：一行给出四组计数，列表很短时面板也不显空。
+  const summary = React.useMemo(() => summaryCounts(rows), [rows])
   const needle = query.trim().toLocaleLowerCase()
+  const matchRow = (row) => !needle
+    || String(row.title || '').toLocaleLowerCase().includes(needle)
+    || String(row.state || '').includes(needle)
+    || String(row.workspaceTitle || '').toLocaleLowerCase().includes(needle)
+  // v0.5.0 次级区：与关注区**不同维度**（时间维度 / 标记维度）。
+  // 数据直接取自面板已在拉的宿主列表（dsmMetaCache），不新增请求；渲染期现算，
+  // 配合 1s tick 保证「多久以前」这类相对时间始终新鲜。
+  const metaItems = dsmActivityItems()
+  const now = Date.now()
+  const recentSec = recentActiveRows(metaItems, { now, exclude: view.attentionIds })
+  const recentShown = recentSec.rows.filter(matchRow)
+  // 已标记区再排除「刚在最近活跃里出现过」的，同一会话依旧只出现一次。
+  const markedSec = markedRows(metaItems, {
+    now,
+    exclude: new Set([...view.attentionIds, ...recentSec.rows.map((r) => r.sessionId)]),
+  })
+  const markedShown = markedSec.rows.filter(matchRow)
+  const shownGroups = QA_GROUP_META
+    .map(({ key, label, color }) => ({ key, label, color, list: (groups[key] || []).filter(matchRow) }))
+    .filter((g) => g.list.length > 0)
+  const hasAny = shownGroups.length > 0 || recentShown.length > 0 || markedShown.length > 0
   const jump = (row) => {
     const svc = dsmSessionsService()
     if (!svc || typeof svc.open !== 'function') {
@@ -610,6 +703,37 @@ function DsmQuickAccessPanel({ compact = false } = {}) {
       setJumpErr('跳转失败：' + String((e && e.message) || e))
     }
   }
+  // 次级区共用渲染：左侧可选徽标（已标记区）→ 标题 → 工作区 → 相对时间。
+  const renderSec = (key, label, hint, shown, total) => {
+    if (!shown.length) return null
+    const hidden = Math.max(0, Number(total || 0) - shown.length)
+    return (
+      <div key={key} className="dsm-qa-group dsm-qa-sec">
+        <div className="dsm-qa-group-t dsm-qa-sec-h">
+          <span className="dsm-qa-sec-label">{label}</span>
+          {hint && <span className="dsm-qa-sec-hint">{hint}</span>}
+          {hidden > 0 && <span className="dsm-qa-sec-hint">另有 {hidden} 个未显示</span>}
+        </div>
+        {shown.map((row) => (
+          <button
+            key={row.sessionId}
+            type="button"
+            className="dsm-qa-row"
+            title={(row.title || row.sessionId)
+              + (row.workspaceTitle ? `（${row.workspaceTitle}）` : '')
+              + (row.ago ? ` · ${row.ago}` : '')
+              + '（点击跳转）'}
+            onClick={() => jump(row)}
+          >
+            {(row.badges || []).map((b) => <span key={b} className="dsm-qa-badge">{b}</span>)}
+            <span className="dsm-qa-row-t">{row.title || shortId(row.sessionId)}</span>
+            {row.workspaceTitle && <span className="dsm-qa-ws">{row.workspaceTitle}</span>}
+            {row.ago && <span className="dsm-qa-ago">{row.ago}</span>}
+          </button>
+        ))}
+      </div>
+    )
+  }
   return (
     <div className={compact ? 'dsm-qa-rail' : 'dsm-qa-main'}>
       <div className="dsm-qa-main-head">
@@ -624,46 +748,71 @@ function DsmQuickAccessPanel({ compact = false } = {}) {
           >在右栏打开</button>
         )}
       </div>
+      <div className="dsm-qa-sum" role="status" title="进行中的会话面板统计（共 N 个 = 插件索引到的会话总数）">
+        {QA_GROUP_META.map(({ key, label, color }) => (
+          <span key={key} className={'dsm-qa-sum-i' + (summary[key] ? ' dsm-qa-sum-on' : '')}>
+            <span className="dsm-qa-dot" style={{ background: color }} />{label} {summary[key]}
+          </span>
+        ))}
+        <span className="dsm-qa-sum-i dsm-qa-sum-all">共 {dsmMetaCache.size} 个会话</span>
+      </div>
       <input
         className="dsm-qa-search"
         type="text"
         value={query}
-        placeholder="筛选（标题 / 状态）"
+        placeholder="筛选（标题 / 状态 / 工作区）"
         aria-label="筛选进行中的会话"
         onChange={(e) => setQuery(e.target.value)}
       />
       {jumpErr && <div className="dtl-note dsm-qa-err">{jumpErr}</div>}
-      {groups.count === 0 && <div className="dtl-note">暂无进行中 / 待处理 / 出错 / 刚完成的会话。{dsmUiSessionStatus ? '' : '（折叠分组里的会话要展开后才会出现在这里）'}</div>}
-      {QA_GROUP_META.map(({ key, label, color }) => {
-        let list = groups[key]
-        if (!list || !list.length) return null
-        if (needle) list = list.filter((row) => String(row.title || '').toLocaleLowerCase().includes(needle) || String(row.state || '').includes(needle))
-        if (!list.length) return null
-        return (
-          <div key={key} className="dsm-qa-group">
-            <div className="dsm-qa-group-t"><span className="dsm-qa-dot" style={{ background: color }} />{label}（{list.length}）</div>
-            {list.map((row) => (
-              <button
-                key={row.sessionId}
-                type="button"
-                className="dsm-qa-row"
-                title={(row.title || row.sessionId)
-                  + (row.subagentCount ? `（含 ${row.subagentCount} 个子代理，已折叠）` : '')
-                  + '（点击跳转）'}
-                onClick={() => jump(row)}
-              >
-                <span className="dsm-qa-dot" style={{ background: color }} />
-                <span className="dsm-qa-row-t">{row.title || shortId(row.sessionId)}</span>
-                {row.subagentCount > 0 && (
-                  <span className="dsm-qa-kids" title={`${row.subagentCount} 个子代理已折叠在父会话下`}>
-                    ▸ {row.subagentCount} 子代理
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
-        )
-      })}
+      {!hasAny && (
+        <div className="dtl-note">
+          {needle ? '没有匹配的会话。' : '暂无进行中 / 待处理 / 出错 / 刚完成的会话。'}
+          {!needle && !metaItems.length && (dsmUiSessionStatus ? '' : '（折叠分组里的会话要展开后才会出现在这里）')}
+        </div>
+      )}
+      {shownGroups.map(({ key, label, color, list }) => (
+        <div key={key} className="dsm-qa-group">
+          <div className="dsm-qa-group-t"><span className="dsm-qa-dot" style={{ background: color }} />{label}（{list.length}）</div>
+          {list.map((row) => (
+            <button
+              key={row.sessionId}
+              type="button"
+              className="dsm-qa-row"
+              title={(row.title || row.sessionId)
+                + (row.subagentCount ? `（含 ${row.subagentCount} 个子代理，已折叠）` : '')
+                + '（点击跳转）'}
+              onClick={() => jump(row)}
+            >
+              <span className="dsm-qa-dot" style={{ background: color }} />
+              <span className="dsm-qa-row-t">{row.title || shortId(row.sessionId)}</span>
+              {row.subagentCount > 0 && (
+                <span className="dsm-qa-kids" title={`${row.subagentCount} 个子代理已折叠在父会话下`}>
+                  ▸ {row.subagentCount} 子代理
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      ))}
+      {/* v0.5.0 次级区①：时间维度——「我刚才在忙什么」。窗口 = 宿主列表的
+          updatedAt（日志 mtime），故运行中的会话也会在这里，但关注区已列出的
+          一律被排除，不会与上方重复。 */}
+      {renderSec(
+        'recent',
+        '最近活跃',
+        `近 ${Math.round(QA_RECENT_WINDOW_MS / 3600000)} 小时有更新`,
+        recentShown,
+        recentSec.total,
+      )}
+      {/* v0.5.0 次级区②：标记维度——「我自己标过要看的」（v0.1 元数据层）。 */}
+      {renderSec(
+        'marked',
+        '已标记',
+        '★收藏 · 待回看 · P1-P2',
+        markedShown,
+        markedSec.total,
+      )}
     </div>
   )
 }
@@ -5159,6 +5308,18 @@ export function apply(ctx) {
       const store = svc && svc.sessionStatus
       dsmDebugLog('uiSession:probe', 'svc=' + !!svc, 'store=' + !!store,
         'keys=' + (svc ? Object.keys(svc).slice(0, 20).join(',') : '-'))
+      // v0.5.1：「最近活跃」改用客户端会话商店的时间戳（见 dsmSessionListStore 注释）。
+      // 这一行是**长期保留**的一行诊断：GUI 无 console，而「商店是否就绪」决定了
+      // 次级区能不能拿到时间，排障时第一眼就要看到它。
+      try {
+        const listStore = svc && svc.sessions && svc.sessions.list
+        if (listStore && typeof listStore.getSnapshot === 'function') {
+          dsmSessionListStore = listStore
+          dsmDebugLog('session-list:store-ready')
+        } else {
+          dsmDebugLog('session-list:store-missing')
+        }
+      } catch (e) { dsmDebugLog('session-list:store-FATAL', String((e && e.message) || e)) }
       if (!store || typeof store.getSnapshot !== 'function') return
       dsmUiSessionStatus = store
       if (typeof store.subscribe === 'function') {

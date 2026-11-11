@@ -1,4 +1,4 @@
-﻿// dsh-lyin-sessions-manager — client 纯判定逻辑。
+// dsh-lyin-sessions-manager — client 纯判定逻辑。
 //
 // 侧栏增强里最容易随 DSH 上游变化出回归的三块判定抽到这里：
 // 状态点语义、拖拽可放置校验、fiber node → 会话/工作区识别。
@@ -736,5 +736,171 @@ export function overflowPlan(text, more) {
     base,
     more: remaining,
     changed: true,
+  }
+}
+
+// —— v0.5.0：面板次级区（纯函数，可测）———————————————————————————
+// 背景：面板原先只有「需要关注」一个维度（进行中/待处理/出错/刚完成），空闲时
+// 整块空白——用户反馈「面板较空」。次级区补两个**不同维度**，而不是往同一维度
+// 里塞更多同质条目：
+//   最近活跃 = 「我刚才在忙什么」——宿主会话列表的 updatedAt（= 日志文件 mtime）
+//   已标记   = 「我自己标过要看的」——★收藏 / 待回看 / 优先级 ≤2（v0.1 元数据层）
+// 两项的数据全部取自面板**已经在拉**的那份 /archived-sessions/sessions 载荷
+// （该路由以 usage:true 调用，updatedAt 随行带出），故不新增任何请求；上方关注
+// 区已列出的会话一律排除，同一个会话不在面板里出现两次。
+
+// 时间窗与行数上限：窗口取 12 小时（覆盖「今天上午在忙的」），上限 6 行。
+export const QA_RECENT_WINDOW_MS = 12 * 60 * 60 * 1000
+export const QA_SECTION_LIMIT = 6
+// 优先级 ≤2 视为高优先级标记（与 UI 的 P1-P2 深色徽标同口径）。
+export const QA_MARKED_MAX_PRIORITY = 2
+
+// 宽容地把「排除集」归一成 Set：接受 Set / 数组 / null / 单值。
+function idSetOf(v) {
+  if (v instanceof Set) return v
+  const out = new Set()
+  if (Array.isArray(v)) {
+    for (const x of v) if (x != null) out.add(String(x))
+  } else if (v != null) {
+    out.add(String(v))
+  }
+  return out
+}
+
+// 「多久以前」：最近活跃区的时间副标。返回空串表示**不该显示**——没有可信时间戳，
+// 或时间戳在未来（时钟漂移）时宁可不写，也不显示「-3 分钟前」这种自相矛盾的文案。
+export function agoLabel(ts, now = Date.now()) {
+  const t = Number(ts)
+  const n = Number(now)
+  if (!Number.isFinite(t) || t <= 0 || !Number.isFinite(n)) return ''
+  const d = n - t
+  if (d < 0) return ''
+  if (d < 60000) return '刚刚'
+  const min = Math.floor(d / 60000)
+  if (min < 60) return `${min} 分钟前`
+  const hr = Math.floor(min / 60)
+  if (hr < 24) return `${hr} 小时前`
+  const day = Math.floor(hr / 24)
+  if (day < 30) return `${day} 天前`
+  return `${Math.floor(day / 30)} 个月前`
+}
+
+// 顶部摘要条计数。输入 = 关注区（已折叠）的行；'manual'（手动未读）归入刚完成
+// （与 groupQuickAccess 同口径）。attention 是四组之和，供「共 N 个」旁证。
+export function summaryCounts(rows) {
+  const out = { running: 0, feedback: 0, error: 0, done: 0, attention: 0 }
+  const keys = ['running', 'feedback', 'error', 'done']
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (!row || row.sessionId == null) continue
+    const key = row.state === 'manual' ? 'done' : row.state
+    if (!keys.includes(key)) continue
+    out[key] += 1
+    out.attention += 1
+  }
+  return out
+}
+
+// 标记徽标：★收藏 / 待回看 / P1-P2。顺序即展示顺序（收藏最醒目）。
+export function markBadges(item) {
+  const it = item || {}
+  const out = []
+  if (it.starred) out.push('★')
+  if (it.review) out.push('待回看')
+  const p = Number(it.priority)
+  if (Number.isInteger(p) && p >= 1 && p <= QA_MARKED_MAX_PRIORITY) out.push(`P${p}`)
+  return out
+}
+
+// 合成次级区（最近活跃 / 已标记）要用的条目。
+// 两个数据源各有缺口，必须合起来用：
+//   - 客户端会话商店行（storeRows）是本机**唯一**带最后活动时间的来源
+//     （数值 updatedAt，epoch ms；核心侧栏的「5 分钟前」也取自它）；
+//   - 宿主元数据载荷（metaById）提供 starred / priority / review / tags 与
+//     workspaceTitle（SessionHandle 世代的列表项没有 updatedAt）。
+// 标题优先取商店行（displayTitle → title），与核心侧栏显示保持一致，商店缺失时
+// 退回宿主标题。blank 行是还没有内容的占位会话，不参与「最近活跃」排序。
+// metaById 可以是 Map，也可以是普通对象（便于单测直接写字面量）。
+export function mergeActivityItems(storeRows, metaById) {
+  const out = []
+  const metaOf = (id) => {
+    if (!metaById) return {}
+    if (typeof metaById.get === 'function') return metaById.get(id) || {}
+    return metaById[id] || {}
+  }
+  for (const raw of Array.isArray(storeRows) ? storeRows : []) {
+    if (!raw || raw.blank === true) continue
+    if (raw.id == null) continue
+    const id = String(raw.id)
+    const meta = metaOf(id)
+    const title = raw.displayTitle || raw.title || meta.title || ''
+    out.push({
+      sessionId: id,
+      title: typeof title === 'string' ? title : '',
+      workspaceTitle: meta.workspaceTitle,
+      updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : undefined,
+      starred: meta.starred,
+      priority: meta.priority,
+      review: meta.review,
+      tags: meta.tags,
+    })
+  }
+  return out
+}
+
+// 最近活跃：{ now, windowMs, limit, exclude } → { rows, total }。
+// total 是**截断前**的条数，供 UI 显示「另有 N 个未显示」；缺 updatedAt 的行直接
+// 跳过（没有时间就无法判断是否「最近」，硬编一个位置只会误导）。
+export function recentActiveRows(items, { now = Date.now(), windowMs = QA_RECENT_WINDOW_MS, limit = QA_SECTION_LIMIT, exclude = null } = {}) {
+  const skip = idSetOf(exclude)
+  const list = []
+  for (const item of Array.isArray(items) ? items : []) {
+    if (!item || item.sessionId == null) continue
+    const id = String(item.sessionId)
+    if (skip.has(id)) continue
+    const ts = Number(item.updatedAt)
+    if (!Number.isFinite(ts) || ts <= 0) continue
+    if (now - ts > windowMs) continue
+    list.push({
+      sessionId: id,
+      title: item.title || '',
+      workspaceTitle: item.workspaceTitle || '',
+      updatedAt: ts,
+    })
+  }
+  list.sort((a, b) => b.updatedAt - a.updatedAt)
+  const cap = Math.max(0, Math.floor(Number(limit)) || 0)
+  return {
+    rows: list.slice(0, cap).map((r) => ({ ...r, ago: agoLabel(r.updatedAt, now) })),
+    total: list.length,
+  }
+}
+
+// 已标记：★收藏 / 待回看 / 优先级 ≤2 三者合并去重，P1 在前、同级按最近更新在前，
+// 再按 updatedAt 兜底。返回形状与最近活跃一致（多一个 badges），便于同一段 UI 渲染。
+export function markedRows(items, { now = Date.now(), limit = QA_SECTION_LIMIT, exclude = null } = {}) {
+  const skip = idSetOf(exclude)
+  const list = []
+  for (const item of Array.isArray(items) ? items : []) {
+    if (!item || item.sessionId == null) continue
+    const id = String(item.sessionId)
+    if (skip.has(id)) continue
+    const badges = markBadges(item)
+    if (!badges.length) continue
+    const p = Number(item.priority)
+    list.push({
+      sessionId: id,
+      title: item.title || '',
+      workspaceTitle: item.workspaceTitle || '',
+      updatedAt: Number(item.updatedAt) || 0,
+      badges,
+      // 排序键：有优先级的按 1..5，无优先级的排到有优先级之后（不假装自己是 P3）。
+      order: Number.isInteger(p) && p >= 1 && p <= 5 ? p : 99,
+    })
+  }
+  list.sort((a, b) => (a.order - b.order) || (b.updatedAt - a.updatedAt))
+  const cap = Math.max(0, Math.floor(Number(limit)) || 0)
+  return {
+    rows: list.slice(0, cap).map(({ order, ...r }) => ({ ...r, ago: agoLabel(r.updatedAt, now) })),
+    total: list.length,
   }
 }
