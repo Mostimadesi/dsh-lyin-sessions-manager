@@ -180,15 +180,19 @@ body[data-ds-dark-theme] .archv{color-scheme:dark}
 .dsm-inline-dot{width:7px;height:7px;border-radius:50%;flex:none;display:inline-block;margin-right:7px;vertical-align:middle;box-shadow:0 0 4px rgba(0,0,0,.25)}
 .dsm-inline-dot-wrap{display:inline-flex;align-items:center;min-width:0}
 /* v0.2.1 全局面板（panellist + main）形态。 */
-.dsm-qa-main{padding:18px 22px;max-width:var(--dsmqa-width,760px);margin:0 auto;font-size:13px;color:var(--dsmqa-fg,#F1EFE8)}
+/* v0.5.3 滚动：分区变多后面板可能比容器还高，两个形态各自成为滚动容器。
+   max-height:100% 只在宿主给定了容器高度时生效——宿主若本来就是整页滚动，
+   这条不产生任何变化（不会出现「滚动条里还有滚动条」的并排双条）。 */
+.dsm-qa-main{padding:18px 22px;max-width:var(--dsmqa-width,760px);margin:0 auto;font-size:13px;color:var(--dsmqa-fg,#F1EFE8);max-height:100%;overflow-y:auto}
 .dsm-qa-main-head{display:flex;align-items:baseline;gap:12px;margin-bottom:14px}
 .dsm-qa-main-title{font-size:16px;font-weight:700;letter-spacing:.3px}
 .dsm-qa-main-count{font-size:12px;opacity:.6}
 .dsm-qa-search{width:100%;box-sizing:border-box;padding:8px 12px;border-radius:9px;border:1px solid rgba(127,127,127,.28);background:rgba(255,255,255,.05);color:inherit;font-size:12.5px;margin-bottom:12px}
 .dsm-qa-search:focus{outline:none;border-color:var(--dsw-alias-state-business-primary,#5B8DEF)}
 .dsm-qa-main .dsm-qa-row{padding:9px 12px;font-size:13px}
-/* v0.3.0 右侧栏形态：窄布局（右栏 ~320px），去大内边距、行更紧凑。 */
-.dsm-qa-rail{padding:10px 12px;max-width:none;margin:0;font-size:12.5px;color:var(--dsmqa-fg,#F1EFE8)}
+/* v0.3.0 右侧栏形态：窄布局（右栏 ~320px），去大内边距、行更紧凑。
+   v0.5.3：同样自成滚动容器（右栏高度有限，分区多了必须能滚）。 */
+.dsm-qa-rail{padding:10px 12px;max-width:none;margin:0;font-size:12.5px;color:var(--dsmqa-fg,#F1EFE8);max-height:100%;overflow-y:auto}
 .dsm-qa-rail .dsm-qa-main-head{margin-bottom:8px;gap:8px}
 .dsm-qa-rail .dsm-qa-main-title{font-size:13px;font-weight:600}
 .dsm-qa-rail .dsm-qa-main-count{font-size:11px;opacity:.6}
@@ -618,12 +622,36 @@ const QA_GROUP_META = [
 // v0.3.0：同一组件服务两种容器——全局面板（main slot，宽布局）与右侧栏
 // 标签页（sidebar.right.pane.tab，窄布局）。compact=true 时去掉大标题与
 // 内边距，适配右栏 ~320px 宽度。
+// v0.5.3 诊断（每次页面加载一行）：面板能否滚动取决于宿主容器有没有给定高度，
+// 而 GUI 没有 console——这里把自身与祖先的滚动能力一次性记进 debug.log：
+// oy=overflow-y，ch=clientHeight，sh=scrollHeight（ch < sh 且 oy 可滚 = 真的能滚）。
+// 保留一行成本极低，且下次「面板滚不动」时不用再从头推断。
+let dsmScrollProbeDone = false
+function dsmProbeScroll(el) {
+  if (dsmScrollProbeDone || !el) return
+  dsmScrollProbeDone = true
+  try {
+    const parts = []
+    let cur = el
+    for (let i = 0; i < 7 && cur; i += 1) {
+      const cs = window.getComputedStyle(cur)
+      const cls = String(cur.className || '').split(/\s+/).filter(Boolean).slice(0, 2).join('.')
+      parts.push(`${i}:${cur.tagName.toLowerCase()}${cls ? '.' + cls : ''} oy=${cs.overflowY} ch=${cur.clientHeight} sh=${cur.scrollHeight}`)
+      cur = cur.parentElement
+    }
+    dsmDebugLog('panel:scroll', parts.join(' | '))
+  } catch (e) { /* best-effort */ }
+}
+
 function DsmQuickAccessPanel({ compact = false } = {}) {
   // v0.5.0：view = { rows（关注区，子代理已折叠）, attentionIds（关注区**折叠前**的
   // 全部会话 id）}。attentionIds 用于把关注区已列出的会话从次级区排除——折叠掉的
   // 子代理也算「已在上方出现」，否则它们会用自己的名字出现在「最近活跃」里。
   const [view, setView] = React.useState({ rows: [], attentionIds: new Set() })
   const rows = view.rows
+  // v0.5.3：记录一次面板与宿主容器的滚动能力（见 dsmProbeScroll）。
+  const rootRef = React.useRef(null)
+  React.useEffect(() => { dsmProbeScroll(rootRef.current) }, [])
   // v0.3.3 诊断：本体一旦渲染即记录（只记一次），用于判断 slot 是否命中。
   React.useEffect(() => { dsmDebugLog('rail:body-rendered', 'compact=' + !!compact) }, [compact])
   const [jumpErr, setJumpErr] = React.useState('')
@@ -746,7 +774,7 @@ function DsmQuickAccessPanel({ compact = false } = {}) {
     )
   }
   return (
-    <div className={compact ? 'dsm-qa-rail' : 'dsm-qa-main'}>
+    <div ref={rootRef} className={compact ? 'dsm-qa-rail' : 'dsm-qa-main'}>
       <div className="dsm-qa-main-head">
         <span className="dsm-qa-main-title">进行中的会话</span>
         <span className="dsm-qa-main-count">{groups.count > 0 ? `${groups.count} 个` : '暂无'}</span>
