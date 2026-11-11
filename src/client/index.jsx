@@ -11,7 +11,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { aliveSessionCount, applyTagFilter, ascPriority, canDropOnWorkspace, collapsedVisibleTotal, countRenderedVisible, dotStateFor, dragAutoScrollStep, effectiveTitleOf, filterShapeFromSaved, filterSnapshotOf, foldBranches, foldOrphanSubagents, foldSubagentRows, foldSubagents, groupQuickAccess, markedRows, mergeActivityItems, noticeToastPlan, QA_RECENT_WINDOW_MS, recentActiveRows, stateFromSessionStatus, summaryCounts, openSubagentToast, overflowPlan, pathTail, priorityOf, remainingRows, reviewOf, sessionForNodes, shortId, starredOf, tagDeleteConfirm, titleBackfillDecision, toastDurationFor, workspaceForNodes } from './logic.js'
+import { aliveSessionCount, applyTagFilter, ascPriority, canDropOnWorkspace, collapsedVisibleTotal, countRenderedVisible, dotStateFor, dragAutoScrollStep, effectiveTitleOf, filterShapeFromSaved, filterSnapshotOf, foldActivityItems, foldBranches, foldOrphanSubagents, foldSubagentRows, foldSubagents, groupQuickAccess, markedRows, mergeActivityItems, noticeToastPlan, QA_RECENT_WINDOW_MS, recentActiveRows, stateFromSessionStatus, summaryCounts, openSubagentToast, overflowPlan, pathTail, priorityOf, remainingRows, reviewOf, sessionForNodes, shortId, starredOf, tagDeleteConfirm, titleBackfillDecision, toastDurationFor, workspaceForNodes } from './logic.js'
 
 export const inject = ['slots']
 
@@ -391,8 +391,10 @@ let dsmHostListAt = 0
 let dsmHostListLogged = false
 // 列表来源：宿主 /archived-sessions/sessions（请求路径零解码，成本低）。
 // 15 秒节流；失败则清空时间戳以便下次重试。
-function dsmEnsureHostTitles() {
-  if (Date.now() - dsmHostListAt < 15000) return
+// v0.5.2：force=true 强制刷新——面板每次打开都拉一次最新标注，否则刚打的标记
+// 会被 15s 节流挡住，用户得「关掉再点开」才看得见（用户反馈）。
+function dsmEnsureHostTitles(force = false) {
+  if (!force && Date.now() - dsmHostListAt < 15000) return
   dsmHostListAt = Date.now()
   try {
     fetch('/archived-sessions/sessions', {
@@ -649,11 +651,13 @@ function DsmQuickAccessPanel({ compact = false } = {}) {
         attentionIds: new Set(rows.map((r) => String(r.sessionId))),
       }
     }
-    const tick = () => {
-      dsmEnsureHostTitles() // 标题/元数据补齐（15s 节流）
+    const tick = (force = false) => {
+      // v0.5.2：打开面板时强制拉一次（force=true），此后按 15s 节流；
+      // 否则刚在管理面板打的标记会被节流挡住，必须关掉再点开才出现。
+      dsmEnsureHostTitles(force) // 标题/元数据补齐（15s 节流）
       setView(collect())
     }
-    tick()
+    tick(true)
     const timer = window.setInterval(tick, 1000)
     // uiSession 是响应式 store：状态一变立刻刷新（不必等下一拍）。
     let unsub = null
@@ -671,9 +675,10 @@ function DsmQuickAccessPanel({ compact = false } = {}) {
     || String(row.state || '').includes(needle)
     || String(row.workspaceTitle || '').toLocaleLowerCase().includes(needle)
   // v0.5.0 次级区：与关注区**不同维度**（时间维度 / 标记维度）。
-  // 数据直接取自面板已在拉的宿主列表（dsmMetaCache），不新增请求；渲染期现算，
-  // 配合 1s tick 保证「多久以前」这类相对时间始终新鲜。
-  const metaItems = dsmActivityItems()
+  // 数据直接取自面板已在拉的宿主列表（dsmMetaCache）与客户端会话商店，不新增请求；
+  // 渲染期现算，配合 1s tick 保证「多久以前」这类相对时间始终新鲜。
+  // v0.5.2：先折叠子代理——子代理不单独成行，时间与标记归并到父会话（与关注区同）。
+  const metaItems = foldActivityItems(dsmActivityItems(), dsmLineage, dsmTitleOf)
   const now = Date.now()
   const recentSec = recentActiveRows(metaItems, { now, exclude: view.attentionIds })
   const recentShown = recentSec.rows.filter(matchRow)
@@ -720,6 +725,7 @@ function DsmQuickAccessPanel({ compact = false } = {}) {
             type="button"
             className="dsm-qa-row"
             title={(row.title || row.sessionId)
+              + (row.subagentCount ? `（含 ${row.subagentCount} 个子代理，已折叠）` : '')
               + (row.workspaceTitle ? `（${row.workspaceTitle}）` : '')
               + (row.ago ? ` · ${row.ago}` : '')
               + '（点击跳转）'}
@@ -727,6 +733,11 @@ function DsmQuickAccessPanel({ compact = false } = {}) {
           >
             {(row.badges || []).map((b) => <span key={b} className="dsm-qa-badge">{b}</span>)}
             <span className="dsm-qa-row-t">{row.title || shortId(row.sessionId)}</span>
+            {row.subagentCount > 0 && (
+              <span className="dsm-qa-kids" title={`${row.subagentCount} 个子代理已折叠在父会话下`}>
+                ▸ {row.subagentCount} 子代理
+              </span>
+            )}
             {row.workspaceTitle && <span className="dsm-qa-ws">{row.workspaceTitle}</span>}
             {row.ago && <span className="dsm-qa-ago">{row.ago}</span>}
           </button>

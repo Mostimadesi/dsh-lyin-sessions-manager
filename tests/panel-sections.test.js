@@ -6,9 +6,11 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   agoLabel,
+  foldActivityItems,
   markBadges,
   markedRows,
   mergeActivityItems,
+  QA_RECENT_LIMIT,
   QA_SECTION_LIMIT,
   recentActiveRows,
   summaryCounts,
@@ -94,10 +96,12 @@ test('最近活跃：缺 updatedAt 的行跳过，截断时 total 保留真实�
   assert.deepEqual(rows.map((r) => r.sessionId), ['s0', 's1', 's2'])
 })
 
-test('最近活跃：limit 缺省为 6，脏输入返回空集', () => {
+test('最近活跃：limit 缺省为 8（v0.5.2 按用户反馈从 6 放宽），脏输入返回空集', () => {
   const items = []
   for (let i = 0; i < 20; i += 1) items.push({ sessionId: 's' + i, updatedAt: NOW - i * MIN })
-  assert.equal(recentActiveRows(items, { now: NOW }).rows.length, QA_SECTION_LIMIT)
+  assert.equal(QA_RECENT_LIMIT, 8)
+  assert.equal(recentActiveRows(items, { now: NOW }).rows.length, QA_RECENT_LIMIT)
+  assert.equal(recentActiveRows(items, { now: NOW }).rows.length, 8)
   assert.deepEqual(recentActiveRows(null, { now: NOW }), { rows: [], total: 0 })
   assert.deepEqual(recentActiveRows([null, {}, { sessionId: null, updatedAt: NOW }], { now: NOW }), { rows: [], total: 0 })
 })
@@ -146,6 +150,7 @@ test('已标记：exclude 生效（含刚在「最近活跃」里出现过的）
 })
 
 test('已标记：脏行容错，limit 截断保留 total', () => {
+  assert.equal(QA_SECTION_LIMIT, 6, '已标记区仍为 6 行（放宽的只有最近活跃）')
   assert.deepEqual(markedRows(null).rows, [])
   assert.deepEqual(markedRows([null, {}, { sessionId: 'x' }]).rows, [])
   const items = []
@@ -211,4 +216,80 @@ test('合成：接入次级区——商店时间进最近活跃，宿主标记�
   })
   assert.deepEqual(marked.rows.map((r) => r.sessionId), ['old'])
   assert.deepEqual(marked.rows[0].badges, ['★', 'P2'])
+})
+
+// v0.5.2：次级区折叠（用户反馈：最近活跃里会冒出子代理）。规则与关注区一致——
+// 子代理不单独成行；但这两区是「数据列表」，所以合并的是时间与标记本身。
+test('折叠：子代理归并到父会话，时间取最新、标记向上合并', () => {
+  const items = [
+    { sessionId: 'p', title: '父会话', updatedAt: NOW - 3 * HOUR },
+    { sessionId: 'k1', title: '子代理一', updatedAt: NOW - MIN, starred: true },
+    { sessionId: 'k2', title: '子代理二', updatedAt: NOW - 2 * HOUR, priority: 2, workspaceTitle: 'WS' },
+  ]
+  const lineage = new Map([
+    ['p', { origin: 'main' }],
+    ['k1', { origin: 'subagent', parentSession: 'p' }],
+    ['k2', { origin: 'subagent', parentSession: 'p' }],
+  ])
+  const out = foldActivityItems(items, lineage, () => '')
+  assert.deepEqual(out.map((r) => r.sessionId), ['p'], '子代理不再单独成行')
+  assert.equal(out[0].title, '父会话')
+  assert.equal(out[0].updatedAt, NOW - MIN, '时间取子树最新')
+  assert.equal(out[0].subagentCount, 2)
+  assert.equal(out[0].starred, true, '标记向上合并：★')
+  assert.equal(out[0].priority, 2)
+  assert.equal(out[0].workspaceTitle, 'WS', '工作区名从子行补上')
+})
+
+test('折叠：父会话不在列表时合成一行，多级子代理落到同一个父', () => {
+  const items = [
+    { sessionId: 'k', title: '子代理', updatedAt: NOW - MIN },
+    { sessionId: 'gk', title: '孙代理', updatedAt: NOW - 2 * MIN },
+  ]
+  const lineage = new Map([
+    ['k', { origin: 'subagent', parentSession: 'p' }],
+    ['gk', { origin: 'subagent', parentSession: 'k' }],
+  ])
+  const out = foldActivityItems(items, lineage, (id) => (id === 'p' ? '父标题（血缘）' : ''))
+  assert.deepEqual(out.map((r) => r.sessionId), ['p'])
+  assert.equal(out[0].title, '父标题（血缘）', '合成父行用 titleOf 取标题')
+  assert.equal(out[0].subagentCount, 2)
+  assert.equal(out[0].updatedAt, NOW - MIN)
+})
+
+test('折叠：非子代理原样保留，缺血缘 / 成环 / 脏输入不炸', () => {
+  assert.deepEqual(foldActivityItems(null, null, null), [])
+  assert.deepEqual(foldActivityItems([], new Map(), null), [])
+  const plain = [{ sessionId: 'a', title: 'A', updatedAt: NOW }, { sessionId: 'b', title: 'B' }]
+  assert.deepEqual(
+    foldActivityItems(plain, new Map(), null).map((r) => r.sessionId),
+    ['a', 'b'],
+    '没有血缘信息就不折叠',
+  )
+  // 成环（互相当父）：放弃折叠，两行都留在顶层，绝不丢会话
+  const cyc = new Map([
+    ['a', { origin: 'subagent', parentSession: 'b' }],
+    ['b', { origin: 'subagent', parentSession: 'a' }],
+  ])
+  const out = foldActivityItems([{ sessionId: 'a', title: 'A' }, { sessionId: 'b', title: 'B' }], cyc, null)
+  assert.equal(out.length, 2)
+  assert.deepEqual(out.map((r) => r.sessionId), ['a', 'b'])
+})
+
+test('折叠接入次级区：只出现父行，子代理的标记随父行进已标记', () => {
+  const items = [
+    { sessionId: 'p', title: '父会话', updatedAt: NOW - MIN },
+    { sessionId: 'k', title: '子代理', updatedAt: NOW - 10 * 1000, priority: 1 },
+  ]
+  const lineage = new Map([['k', { origin: 'subagent', parentSession: 'p' }]])
+  const folded = foldActivityItems(items, lineage, () => '')
+  const recent = recentActiveRows(folded, { now: NOW })
+  assert.deepEqual(recent.rows.map((r) => r.sessionId), ['p'])
+  assert.equal(recent.rows[0].subagentCount, 1, '子代理数透传到次级区行')
+  const marked = markedRows(folded, { now: NOW, exclude: new Set(['p']) })
+  assert.deepEqual(marked.rows, [], '父行被排除后，子代理自己不会再冒出来')
+  const markedAll = markedRows(folded, { now: NOW })
+  assert.deepEqual(markedAll.rows.map((r) => r.sessionId), ['p'])
+  assert.deepEqual(markedAll.rows[0].badges, ['P1'])
+  assert.equal(markedAll.rows[0].subagentCount, 1)
 })

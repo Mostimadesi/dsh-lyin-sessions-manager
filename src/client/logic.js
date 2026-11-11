@@ -749,8 +749,11 @@ export function overflowPlan(text, more) {
 // （该路由以 usage:true 调用，updatedAt 随行带出），故不新增任何请求；上方关注
 // 区已列出的会话一律排除，同一个会话不在面板里出现两次。
 
-// 时间窗与行数上限：窗口取 12 小时（覆盖「今天上午在忙的」），上限 6 行。
+// 时间窗与行数上限：窗口取 12 小时（覆盖「今天上午在忙的」）。
+// v0.5.2：最近活跃按用户反馈放宽到 8 行（QA_RECENT_LIMIT）；已标记区仍是 6 行
+// （QA_SECTION_LIMIT 作为次级区的通用缺省）。
 export const QA_RECENT_WINDOW_MS = 12 * 60 * 60 * 1000
+export const QA_RECENT_LIMIT = 8
 export const QA_SECTION_LIMIT = 6
 // 优先级 ≤2 视为高优先级标记（与 UI 的 P1-P2 深色徽标同口径）。
 export const QA_MARKED_MAX_PRIORITY = 2
@@ -847,10 +850,98 @@ export function mergeActivityItems(storeRows, metaById) {
   return out
 }
 
+// v0.5.2（用户反馈）：次级区（最近活跃 / 已标记）也要折叠子代理——和关注区同一条
+// 规则（子代理不单独成行），但折叠的是**数据**而不是状态：
+//   - updatedAt 取子树最大值：子代理刚动过，父会话就算「最近活跃」；
+//   - 标记向上合并：★ / 待回看 只要子树里有一个就带上，优先级取最紧急的数字
+//     （这样「我标记过的子代理」不会被折叠吃掉）；
+//   - 父行带 subagentCount，UI 显示「▸ N 子代理」，点进去仍是父会话。
+// 折叠只做归并、不新增行：既没被标记、也不在时间窗内的子代理不会因此冒出来。
+// 父会话不在列表里（已归档 / 未加载）时按血缘合成一行（标题取 titleOf）。
+// lineage 支持 Map 或普通对象；血缘成环时放弃折叠（该行原样保留）。
+export function foldActivityItems(items, lineage, titleOf) {
+  const list = Array.isArray(items) ? items : []
+  if (!list.length) return []
+  const lookup = (id) => {
+    if (!lineage) return null
+    if (typeof lineage.get === 'function') return lineage.get(id) || null
+    return lineage[id] || null
+  }
+  const parentIdOf = (id) => {
+    const info = lookup(id)
+    if (!info || info.origin !== 'subagent' || !info.parentSession) return null
+    const pid = String(info.parentSession)
+    return pid && pid !== String(id) ? pid : null
+  }
+  const topParentOf = (id) => {
+    let cur = String(id)
+    for (let i = 0; i < 16; i += 1) {
+      const pid = parentIdOf(cur)
+      if (!pid) return cur
+      cur = pid
+    }
+    return null // 血缘成环 → 不折叠
+  }
+  const prioOf = (v) => {
+    const n = Number(v)
+    return Number.isInteger(n) && n >= 1 && n <= 5 ? n : null
+  }
+  const byId = new Map()
+  for (const it of list) {
+    if (!it || it.sessionId == null) continue
+    const id = String(it.sessionId)
+    if (!byId.has(id)) byId.set(id, it)
+  }
+  const makeRow = (id) => {
+    const own = byId.get(id) || {}
+    return {
+      sessionId: id,
+      title: own.title || (typeof titleOf === 'function' ? titleOf(id) : '') || '',
+      workspaceTitle: own.workspaceTitle || '',
+      updatedAt: typeof own.updatedAt === 'number' ? own.updatedAt : undefined,
+      starred: own.starred === true,
+      review: own.review === true,
+      priority: prioOf(own.priority),
+      subagentCount: 0,
+    }
+  }
+  const merge = (target, src) => {
+    if (typeof src.updatedAt === 'number') {
+      target.updatedAt = typeof target.updatedAt === 'number'
+        ? Math.max(target.updatedAt, src.updatedAt)
+        : src.updatedAt
+    }
+    if (src.starred === true) target.starred = true
+    if (src.review === true) target.review = true
+    const p = prioOf(src.priority)
+    if (p != null) target.priority = target.priority == null ? p : Math.min(target.priority, p)
+    if (!target.workspaceTitle && src.workspaceTitle) target.workspaceTitle = src.workspaceTitle
+    if (!target.title && src.title) target.title = src.title
+    target.subagentCount += 1
+  }
+  const rows = new Map()
+  for (const id of byId.keys()) rows.set(id, makeRow(id))
+  const folded = new Set()
+  for (const id of byId.keys()) {
+    if (!parentIdOf(id)) continue // 顶层会话
+    const root = topParentOf(id)
+    if (!root || root === id) continue
+    if (!rows.has(root)) rows.set(root, makeRow(root)) // 父会话不在列表 → 合成
+    merge(rows.get(root), byId.get(id))
+    folded.add(id)
+  }
+  const out = []
+  for (const [id, row] of rows) {
+    if (folded.has(id)) continue
+    out.push(row)
+  }
+  return out
+}
+
 // 最近活跃：{ now, windowMs, limit, exclude } → { rows, total }。
 // total 是**截断前**的条数，供 UI 显示「另有 N 个未显示」；缺 updatedAt 的行直接
 // 跳过（没有时间就无法判断是否「最近」，硬编一个位置只会误导）。
-export function recentActiveRows(items, { now = Date.now(), windowMs = QA_RECENT_WINDOW_MS, limit = QA_SECTION_LIMIT, exclude = null } = {}) {
+export function recentActiveRows(items, { now = Date.now(), windowMs = QA_RECENT_WINDOW_MS, limit = QA_RECENT_LIMIT, exclude = null } = {}) {
   const skip = idSetOf(exclude)
   const list = []
   for (const item of Array.isArray(items) ? items : []) {
@@ -865,6 +956,8 @@ export function recentActiveRows(items, { now = Date.now(), windowMs = QA_RECENT
       title: item.title || '',
       workspaceTitle: item.workspaceTitle || '',
       updatedAt: ts,
+      // v0.5.2：折叠后的父行带子代理数，UI 显示「▸ N 子代理」。
+      subagentCount: Number(item.subagentCount) || 0,
     })
   }
   list.sort((a, b) => b.updatedAt - a.updatedAt)
@@ -892,6 +985,8 @@ export function markedRows(items, { now = Date.now(), limit = QA_SECTION_LIMIT, 
       title: item.title || '',
       workspaceTitle: item.workspaceTitle || '',
       updatedAt: Number(item.updatedAt) || 0,
+      // v0.5.2：折叠后的父行带子代理数（标记向上合并的结果）。
+      subagentCount: Number(item.subagentCount) || 0,
       badges,
       // 排序键：有优先级的按 1..5，无优先级的排到有优先级之后（不假装自己是 P3）。
       order: Number.isInteger(p) && p >= 1 && p <= 5 ? p : 99,
