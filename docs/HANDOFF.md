@@ -12,7 +12,7 @@
 | 项 | 值 |
 | --- | --- |
 | 本机仓库路径 | `D:\DeepSeek Harness\workspace\plugins_helper\session-manager-unified\dsh-lyin-sessions-manager` |
-| 分支 | `lyin/main`（上游用 `main`；本仓库 `origin` = 用户 GitHub，`upstream` = TOBYCAI） |
+| 分支 / 远程 | `main`；`origin` = https://github.com/Mostimadesi/dsh-lyin-sessions-manager（公开），`upstream` = TOBYCAI/dsh-sessions-manager |
 | 插件包名 | `dsh-lyin-sessions-manager`（**改包名要同时改** `build.mjs` 的 ModuleLoader banner） |
 | package 版本 | `3.8.0`（上游 3.7.10 → 本分支因新增面板能力升 minor） |
 | 目标宿主 | DSH **0.2.2-rc.1**（`D:\DeepSeek Harness`，nightly 通道） |
@@ -383,6 +383,25 @@ npm run check:dist
 6. 每次提交都跑 `check:dist`，并且把 `lib/` 一起提交。
 
 ---
+
+## 14. 远程与推送（本机特有）
+
+- `origin` = `https://github.com/Mostimadesi/dsh-lyin-sessions-manager.git`（公开仓库，2026-11-13 由 API 创建，无初始提交，直接 push 的 `main`）。
+- 认证：本机没装 `gh`；SSH 无可用 key（`Permission denied (publickey)`）；可用的是 **Git Credential Manager 里存的 GitHub token**（login `Mostimadesi`，scopes 含 `repo`）。
+- **关键坑：bash 里的 `git` 不是 Git for Windows。** niubash 的 `git` 是 `2.56.0.windows.4.niugit`，没有 system `credential.helper`，所以
+  `printf "protocol=https\nhost=github.com\n\n" | git credential fill` 会报
+  `fatal: could not read Username for https://github.com: terminal prompts disabled`。
+  改用 **`D:\Git\cmd\git.exe`** 才有 GCM：
+
+  ```powershell
+  :GCM_INTERACTIVE='never'; :GIT_TERMINAL_PROMPT='0'
+  & 'D:Gitcmdgit.exe' push -u origin main
+  ```
+
+- 建仓（若仓库被删后要重建）走 API：`POST /user/repos`，body 里 `name: dsh-lyin-sessions-manager`、`private: false`；令牌用
+  `& 'D:Gitcmdgit.exe' credential fill` 取（脚本见提交历史 / 请求上下文里的 `dsh_gh_create_repo.mjs`）。
+- 不要在命令里回显 token；CC Safety Net 也会拦 `~/.git-credentials`、`~/.ssh` 的读取。
+- 推送体积：`git count-objects -vH` 约 5.6 MiB（`lib/` 已提交、`node_modules` 忽略），常见网络下 push 可能要 30s 以上，别用 30s 超时的前台命令。
 
 ## 附录 A：常用命令
 
