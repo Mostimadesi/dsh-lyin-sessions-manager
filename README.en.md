@@ -1,6 +1,8 @@
-# dsh-sessions-manager
+# dsh-lyin-sessions-manager
 
-> **Possibly the most stable and polished session manager available for DSH today.**
+> **This repository is a personal fork of [TOBYCAI/dsh-sessions-manager](https://github.com/TOBYCAI/dsh-sessions-manager).** On top of everything upstream does, this fork adds a "sessions in progress" quick-access panel (sidebar entry + right-rail tab), three secondary section types (summary bar / recent activity / marked), collapsible groups and a sticky header.
+>
+> Setup, dev loop, known limits and TODOs live in **[docs/HANDOFF.md](./docs/HANDOFF.md)**. The reference below comes from upstream and documents the features both share.
 
 > 中文 | English
 

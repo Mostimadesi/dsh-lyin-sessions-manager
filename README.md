@@ -1,6 +1,8 @@
-# dsh-sessions-manager
+# dsh-lyin-sessions-manager
 
-> **可能是目前最稳定、体验最好的 DSH 会话管理插件。**
+> **本仓库是 [TOBYCAI/dsh-sessions-manager](https://github.com/TOBYCAI/dsh-sessions-manager) 的个人分支。** 除上游的全部会话管理能力外，本分支额外提供「进行中的会话」快捷访问面板（侧栏入口 + 右栏标签页）、顶部摘要条 / 最近活跃 / 已标记三个次级维度、可收起分组与吸顶标题。
+>
+> 安装、开发循环、已知限制与待办见 **[docs/HANDOFF.md](./docs/HANDOFF.md)**（交接文档，含本机环境与验证基线）。下方正文来自上游，描述两者共有的主体功能。
 
 > 中文 | [English](./README.en.md)
 
