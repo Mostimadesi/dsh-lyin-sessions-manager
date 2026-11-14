@@ -48,15 +48,15 @@ git commit -am "..." && npm run check:dist # 提交后再校验产物一致
 
 ```
 src/
-  index.js              host 侧（3358 行）：50 处 registerRoute、存储、自动归档、meta/turn-kind/debug-log/mcp/skills 路由
+  index.js              host 侧（3375 行）：50 处 registerRoute、存储、自动归档、meta/turn-kind/debug-log/mcp/skills 路由
   client/
-    index.jsx           客户端全部 UI（5916 行，纯手写 React，无 jsx 构建，esbuild 直出）
+    index.jsx           客户端全部 UI（5930 行，纯手写 React，无 jsx 构建，esbuild 直出）
     logic.js            纯函数层（1013 行）：所有可单测的逻辑都放这里，UI 只做渲染
   api-auth.js           owner-only 认证门（createApiAuth → { check, wrap }）
   session-meta-index.js 元数据存储 meta-v1（priority/note/review）
   session-meta-cache.js meta 的内存缓存/批量读
   mcp-rows.js           cordis.patch.yml 的 MCP 行解析与开关（文本手术，不引 YAML 库）
-  skill-rows.js         skill 扫描 / 三态 frontmatter 开关 / 导入导出 / 删除（553 行，同样文本手术）
+  skill-rows.js         skill 扫描 / 三态 frontmatter 开关 / 导入导出 / 删除（566 行，同样文本手术）
   zip-lite.js           零依赖 zip 读写（197 行，只依赖 node:zlib），导入导出用
   tag-index.js          标签存储（20 个/会话，名称 ≤32 码点）
   handle-era-ops.js     SessionHandle 世代的操作适配（删除/恢复/移动）
@@ -66,7 +66,7 @@ src/
   zstd-frame.js         直接解码压缩日志帧（turn-kind 用）
 scripts/
   run-tests.mjs         测试入口（预置 DSH_SESSIONS_MANAGER_NO_AUTH=1）
-  compat-smoke.mjs      真实 cordis + 假服务，断言 41 条路由注册 + 认证门放行 owner
+  compat-smoke.mjs      真实 cordis + 假服务，断言路由注册 + 认证门放行 owner
   rescue-smoke.mjs      复制真实 v4 日志到临时目录，跑 32 项破坏性矩阵
   check-session-health.mjs / check-upstream-contract.mjs / compat-runtime.mjs
 tests/                  48 个 *.test.js（node:test），全量 468 项
