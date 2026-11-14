@@ -451,9 +451,17 @@ function dsmEnsureHostTitles(force = false) {
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         const items = (data && data.items) || []
+        // 整表替换，而不是只 add：会话被删/被移走后旧条目必须消失，
+        // 否则「共 N 个会话」永远只增不减，已标记/最近活跃还会列出已删除的会话。
+        const live = new Set()
         for (const it of items) {
-          if (it && it.sessionId != null) dsmMetaCache.set(String(it.sessionId), it)
+          if (it && it.sessionId != null) {
+            const key = String(it.sessionId)
+            live.add(key)
+            dsmMetaCache.set(key, it)
+          }
         }
+        for (const key of [...dsmMetaCache.keys()]) if (!live.has(key)) dsmMetaCache.delete(key)
         if (!dsmHostListLogged) {
           dsmHostListLogged = true
           const ups = items.map((it) => it && it.updatedAt).filter((v) => typeof v === 'number')
@@ -4068,6 +4076,9 @@ function dsmSaveSeenNotices(set) {
 // 通知唯一出口：侧栏通道优先（页面级可见），面板 hook 兜底，都不可用时
 // console.warn——宁可吵，不可无声（copy-guard 锁住 moveNotices 只能走这里）。
 let dsmNotifySink = null
+// 侧栏增强里那些 setInterval 的清算钩子：apply() 注册，dsmTeardownSidebarAug()
+// 调用。没有它，停用插件（或 HMR）后 60s 兜底刷新会跟着旧闭包活到页面关闭。
+let dsmSidebarCleanup = null
 const dsmNoticeHooks = new Set()
 function dsmNotify(text, kind) {
   if (!text) return
@@ -4171,6 +4182,8 @@ const SIDEBAR_ADAPTER_MAX_MISSES = 200
 // 节点，必须整体撤下而不是留在官方侧栏上错位显示），以及插件 effect 卸载。
 // 只按自己的 data-dsm-* 标记删除，绝不碰 DSH 自己的节点。
 function dsmTeardownSidebarAug() {
+  if (typeof dsmSidebarCleanup === 'function') { try { dsmSidebarCleanup() } catch (e) { /* best-effort */ } }
+  dsmSidebarCleanup = null
   if (typeof document === 'undefined') return
   const selectors = ['[data-dsm-dot]', '[data-dsm-kids]', '[data-dsm-subs]', '[data-dsm-tag]']
   for (const sel of selectors) {
@@ -5561,11 +5574,12 @@ function installSidebarWorkspaceDrag() {
     return refresh()
   }
   const REFRESH_MS = 60000
-  setInterval(() => {
+  const refreshTimer = setInterval(() => {
     if (typeof document !== 'undefined' && document.hidden) return
     if (Date.now() - lastRefreshAt < REFRESH_MS) return
     maybeRefresh()
   }, REFRESH_MS)
+  dsmSidebarCleanup = () => clearInterval(refreshTimer)
   if (typeof document !== 'undefined' && document.addEventListener) {
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) return
@@ -5799,7 +5813,7 @@ export function apply(ctx) {
   // 同一能力也尝试注册为客户端 cordis 服务 'lyinSessions'（可用则用）。
   try {
     const api = {
-      version: '3.10.2',
+      version: '3.10.3',
       openSession(id) {
         const target = id === null || id === undefined ? '' : String(id)
         if (!target) return false

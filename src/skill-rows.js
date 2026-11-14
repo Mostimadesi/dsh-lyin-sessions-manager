@@ -522,14 +522,27 @@ export function importSkillDir(srcDir, rootDir, { overwrite = false } = {}) {
 }
 
 /** 删除一个 skill 目录（先做一次内容摘要，返回给调用方展示）。 */
-export function deleteSkillDir(dir, { cwd = process.cwd(), env = process.env, projectRoot = null } = {}) {
+// 删除 skill 目录。给了 trashDir 就**移进回收站**（可恢复），否则才真删。
+// 为什么不能就地改名成 `<dir>.deleted-<stamp>`：那还留在 skills 根里，宿主下次
+// 扫描会把它当成另一个同名 skill 重新列出来。所以回收站必须在根之外。
+export function deleteSkillDir(dir, { cwd = process.cwd(), env = process.env, projectRoot = null, trashDir = null } = {}) {
   const abs = assertWritableDir(dir, { cwd, env, projectRoot })
   const skill = readSkillDir(abs)
   if (!skill) throw new Error('not a valid skill directory')
   const files = collectSkillFiles(abs).map((f) => f.name).sort()
   const digest = createHash('sha256').update(JSON.stringify(files)).digest('hex').slice(0, 12)
-  rmSync(abs, { recursive: true, force: true })
-  return { name: skill.name, dir: abs, files: files.length, digest }
+  let trashed = null
+  if (trashDir) {
+    mkdirSync(trashDir, { recursive: true })
+    const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 19)
+    let target = join(trashDir, `${skill.name}-${stamp}`)
+    for (let i = 1; existsSync(target) && i < 100; i++) target = join(trashDir, `${skill.name}-${stamp}-${i}`)
+    renameSync(abs, target)
+    trashed = target
+  } else {
+    rmSync(abs, { recursive: true, force: true })
+  }
+  return { name: skill.name, dir: abs, files: files.length, digest, trashed }
 }
 
 export default {

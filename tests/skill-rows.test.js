@@ -252,6 +252,21 @@ test('bundled 根里的 skill 只读：拒绝开关与删除，文件原样保�
   assert.equal(existsSync(join(dir, 'SKILL.md')), true, '被拒绝时文件必须原样还在')
 })
 
+test('deleteSkillDir 进回收站：目录被移走而不是删掉，且不在 skills 根里', () => {
+  const { base, root } = tmpRoot()
+  const dir = writeSkill(root, 'demo-skill')
+  const trash = join(base, 'trash', 'skills')
+  const out = deleteSkillDir(dir, { projectRoot: base, trashDir: trash })
+  assert.equal(out.name, 'demo-skill')
+  assert.equal(existsSync(dir), false, '原目录应已移走')
+  assert.ok(out.trashed, '应返回回收站路径')
+  assert.equal(out.trashed.startsWith(trash), true)
+  assert.equal(existsSync(join(out.trashed, 'SKILL.md')), true, '回收站里应保留原文，可恢复')
+  // 回收站绝不能落在 skills 根内：否则宿主下次扫描会把它当成另一个同名 skill。
+  assert.equal(out.trashed.startsWith(root), false)
+  assert.equal(listSkills({ projectRoot: base, env: {} }).skills.some((s2) => s2.name === 'demo-skill'), false)
+})
+
 // ── review 反馈回归（setMode 的读写一致性）──────────────────────────
 const FM = (lines, body = ['', '# 正文', '']) => ['---', ...lines, '---', ...body].join('\n')
 

@@ -63,6 +63,8 @@ const STATE_DIR = process.env.DSH_SESSIONS_MANAGER_STAR_DIR || join(homedir(), '
 // Recycle bin (回收站): normal deletes land here instead of being erased.
 const TRASH_DIR = process.env.DSH_SESSIONS_MANAGER_TRASH_DIR || join(homedir(), '.dsh', 'sessions-manager-trash')
 const TRASH_INDEX = join(TRASH_DIR, 'index.json')
+// 被删掉的 skill 目录也进回收站子目录（与上面同根，便于一起清理）。
+const SKILL_TRASH_DIR = join(TRASH_DIR, 'skills')
 const TRASH_SCHEMA_VERSION = 2
 const DEFAULT_TRASH_SETTINGS = Object.freeze({ retentionDays: 0 })
 // -- per-session detail aggregation (v2.0: 取 Zephyr-vibe buildDetails 精华) --
@@ -2688,9 +2690,23 @@ export function apply(ctx) {
           const out = togglePatchRow(text, { id, enabled })
           let backup = null
           if (out.changed) {
+            // 写前自检：改完必须还能解析，且目标行真的变成了想要的状态。
+            // 否则宁可 500 也不要把 profile 写坏（宿主会判「非法的配置文件」）。
+            const after = parsePatchRows(out.text).rows.find((r) => r.id === id)
+            if (!after || after.enabled !== !!enabled) {
+              return json(res, { ok: false, code: 'DSM_MCP_UNVERIFIED', error: 'toggled text did not round-trip; profile left untouched' }, 500)
+            }
             backup = file + '.bak-mcpui-' + new Date().toISOString().replace(/[:.]/g, '-')
             await writeFile(backup, text, 'utf8')
-            await writeFile(file, out.text, 'utf8')
+            // 原子替换：先在旁边写 tmp 再 rename，中途崩溃不会留下半份 profile。
+            const tmpPatch = file + '.tmp-mcpui-' + process.pid + '-' + Date.now()
+            try {
+              await writeFile(tmpPatch, out.text, 'utf8')
+              await rename(tmpPatch, file)
+            } catch (e) {
+              try { await unlink(tmpPatch) } catch (e2) { /* ignore */ }
+              throw e
+            }
           }
           json(res, { ok: true, changed: out.changed, reason: out.reason || null, backup, needsRestart: true, rows: parsePatchRows(out.text).rows })
         } catch (e) {
@@ -2854,7 +2870,8 @@ export function apply(ctx) {
           // name 必填：删除不可恢复，调用方必须点名要删哪个 skill。
           if (!name) return json(res, { ok: false, code: 'DSM_SKILL_BAD_INPUT', error: 'body: { dir: string, name: string }' }, 400)
           if (known.name !== name) return json(res, { ok: false, code: 'DSM_SKILL_MISMATCH', error: 'name mismatch' }, 400)
-          const out = deleteSkillDir(dir)
+          // 移进回收站而不是 rmSync：删错还能从 ~/.dsh/sessions-manager-trash/skills 里捞回来。
+          const out = deleteSkillDir(dir, { trashDir: SKILL_TRASH_DIR })
           json(res, { ok: true, ...out, needsRestart: false, skills: listSkills({ cwd: process.cwd() }).skills })
         } catch (e) {
           json(res, { ok: false, code: e && e.code, error: String((e && e.message) || e) }, errorStatus(e))
