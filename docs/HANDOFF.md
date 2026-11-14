@@ -370,8 +370,10 @@ localStorage（浏览器侧）：
 | 5 | `dsmFitPanel` 无单测（依赖 DOM） | 靠日志验证 | 若要测，抽纯函数算 `avail` 再测 |
 | 6 | 上游若有新版格式 | 未跟踪 | 见 §12 |
 | 7 | MCP 服务器开关（`/archived-sessions/mcp/*` + 维护栏 sheet） | 已实现并通过单测（`tests/mcp-rows.test.js` 13 项 + `tests/mcp-routes.test.js` 2 项） | 真机点一遍；确认重启后 MCP 连接按新开关状态建立 |
-| 9 | skill 列表管理（`/archived-sessions/skills/*` + 维护栏 sheet） | 已实现；单测 `tests/skill-rows.test.js` 20 项 + `tests/zip-lite.test.js` 14 项 + `tests/skill-routes.test.js` 6 项全绿 | 真机点一遍三态；确认切换后下一次对话里模型看到的目录随之变化 |
+| 9 | skill 列表管理（`/archived-sessions/skills/*` + 维护栏 sheet） | 已实现；单测 `tests/skill-rows.test.js` 21 项 + `tests/zip-lite.test.js` 15 项 + `tests/skill-routes.test.js` 5 项全绿 | 真机点一遍三态；确认切换后下一次对话里模型看到的目录随之变化 |
 | 11 | skill 子系统的评审 16 条 | 全部处理完毕（v0.6.2）：服务端只读校验、解压炸弹、重复条目、重复键、行内注释、CRLF、`on` 不动点、tmp 撞名、客户端导出校验、覆盖备份、`import-dir` 的 srcDir 白名单、delete 强制 name、以及 4 处测试缺口 | 若再改 skill 子系统，先读 §10 的 17–26 条 |
+| 12 | v0.6.3 全量自审修复的 4 项（MCP 原子写+回读校验、skill 删除进回收站、`dsmMetaCache` 整表替换、侧栏 interval 可卸载） | 全部已修并有回归测试（v0.6.3，§10 第 27–30 条） | 改这几处前先读 §10 第 27–30 条，别把「回收站放进 skills 根」这类坑再踩一遍 |
+| 13 | `~/.dsh/sessions-manager/debug.log` 无轮转 | 已 160 KB / 2100+ 行，重启后继续增长 | 若要长期保留，加个大小上限或按日期切分 |
 | 10 | skill 导入导出的 license 边界 | `dsh-purge` 是**商业闭源**许可（禁止复制/修改/再分发），所以 zip 读写是自研的 `src/zip-lite.js`，未复制其任何代码 | 若日后要引入其实现，必须先取得授权 |
 | 8 | `dsh-mcp-manager` 是否删除 | 用户计划整合完成后移除，当前仍在 profile 依赖里且被 `disabled: true` 停用 | 用户自行 `dsh plugin --profile desktop remove dsh-mcp-manager`；本插件的 MCP 能力**不依赖它** |
 
@@ -415,7 +417,7 @@ npm run check:dist
 4. 要改 UI 前，先确认改的是现役选择器（`.dsm-qa-main` / `.dsm-qa-rail`），别改已停用的 `.dsm-qa-panel`。
 5. 不要替用户做「拆三行 / 改名」这类产品决定；把方案摆出来让用户选。
 6. 每次提交都跑 `check:dist`，并且把 `lib/` 一起提交。
-7. 改 skill 子系统前先读 §10 的 17–26 条——那十条全是评审实测出来的真缺陷，且都有回归测试兜着，改的时候别把它们改回去。
+7. 改 skill / MCP 子系统前先读 §10 的 17–30 条——那十四条全是评审与自审实测出来的真缺陷，且都有回归测试兜着，改的时候别把它们改回去。
 8. `edit` 工具写 `src/client/index.jsx` 会产出 **CRLF**。改完用 `git diff --stat` 看行数，异常就用 node `.replace(/\r\n/g,'\n')` 归一化后再 `commit --amend`；长文件优先用 python/node 脚本改而不是 `edit`。
 
 ---
@@ -438,6 +440,30 @@ npm run check:dist
   `& 'D:Gitcmdgit.exe' credential fill` 取（脚本见提交历史 / 请求上下文里的 `dsh_gh_create_repo.mjs`）。
 - 不要在命令里回显 token；CC Safety Net 也会拦 `~/.git-credentials`、`~/.ssh` 的读取。
 - 推送体积：`git count-objects -vH` 约 5.6 MiB（`lib/` 已提交、`node_modules` 忽略），常见网络下 push 可能要 30s 以上，别用 30s 超时的前台命令。
+
+## 15. 最近三代改了什么（v0.6.1 → v0.6.3）
+
+新会话不必回看 git log 的全部细节，这一节就是浓缩版；每条都能在 §10 找到对应的坑与纪律。
+
+### v0.6.1 — skill 管理（`1223c46`）
+- 新增 `src/skill-rows.js`（扫描宿主 skill 根、读/写 SKILL.md frontmatter、三态映射、导入导出、删除）与 `src/zip-lite.js`（零依赖 zip，只用 `node:zlib`）。
+- `src/index.js` 加 6 条 `/archived-sessions/skills/*` 路由（list / mode / export / import / import-dir / delete），全部走 `registerRoute` 因此都在认证门内。
+- 客户端维护栏加「Skill 列表」按钮 + sheet（三态分段控件 / 导出 / 导入 / 删除 / 已忽略目录）。
+- **为什么不用 MCP 那套 `#OFF#` 注释行手术**：skill 在 `cordis.patch.yml` 里根本没有行，发现完全靠文件系统扫描；开关只能落在 frontmatter。
+
+### v0.6.2 — 按只读评审的 16 条加固（`bb7f588`）
+- 服务端开始校验 `writable`（`DSM_SKILL_READONLY`）、`delete` 强制 `name`、`import-dir` 的 `srcDir` 必须落在扫描根内（`DSM_SKILL_BAD_SRC`）。
+- `readZip` 加 `maxTotalBytes` 并给 `inflateRawSync` 传 `maxOutputLength`（压缩炸弹：40 MB 的 0 压完只有 40 KB，靠 32 MiB 的请求体上限拦不住）。
+- `setMode` 变成三态的不动点、重复键收敛成一行、剥行尾注释、沿用原文件换行符；导出不再打包自己的 `.bak-skill-*` / `.import-*`；覆盖导入改成把旧目录改名成 `<name>.replaced-<stamp>` 保留。
+- 客户端导出改成 `fetch` + 校验 `content-type` + `createObjectURL`（裸 `<a download>` 会把错误 JSON 存成 .zip）；导入的 `overwrite` 不再写死，改成 `window.confirm`。
+
+### v0.6.3 — 全量自审又抓到 4 个（`38029dc`）
+- MCP 写 profile 改为「先回读校验 → tmp + rename」（`DSM_MCP_UNVERIFIED`），避免留下半份 YAML 让宿主判「非法的配置文件」。
+- `deleteSkillDir` 默认移进 `~/.dsh/sessions-manager-trash/skills`（返回 `trashed`），不再硬删。
+- `dsmMetaCache` 改整表替换（被删/被移走的会话不再常驻面板）。
+- 侧栏 60s 兜底刷新的 `setInterval` 挂到 `dsmSidebarCleanup`，由 `dsmTeardownSidebarAug()` 清算。
+
+---
 
 ## 附录 A：常用命令
 
