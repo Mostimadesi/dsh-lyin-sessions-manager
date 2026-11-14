@@ -239,6 +239,16 @@ body[data-ds-dark-theme] .archv{color-scheme:dark}
 .mv-sheet-title{font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary);margin:0}
 .mv-sheet-close{appearance:none;width:26px;height:26px;color:var(--dsw-alias-label-secondary);background:0 0;border:none;border-radius:7px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:16px;line-height:1}
 .mv-sheet-close:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
+.mcp-list{display:flex;flex-direction:column}
+.mcp-row{display:flex;align-items:center;gap:12px;padding:9px 0;border-top:1px solid var(--dsw-alias-border-l2)}
+.mcp-row:first-child{border-top:none}
+.mcp-meta{min-width:0;flex:1}
+.mcp-name{font-size:12.5px;font-weight:600;color:var(--dsw-alias-label-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mcp-sub{font-size:11px;color:var(--dsw-alias-label-tertiary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mcp-sw{min-width:76px}
+.mcp-sw-on{color:var(--dsw-alias-state-business-primary);border-color:var(--dsw-alias-state-business-primary)}
+.mcp-note{font-size:11px;line-height:1.5;color:var(--dsw-alias-label-tertiary)}
+.mcp-err{color:var(--dsw-alias-state-error-primary)}
 .mv-seg{display:flex;gap:2px;padding:2px;background:var(--dsw-alias-fill-elevated);border:1px solid var(--dsw-alias-border-l2);border-radius:var(--dsm-radius-sheet);width:100%}
 .mv-segbtn{appearance:none;flex:1;min-height:30px;padding:0 12px;border:none;background:transparent;color:var(--dsw-alias-label-secondary);border-radius:8px;font-size:12px;font-weight:500;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px}
 .mv-segbtn:hover:not(:disabled){color:var(--dsw-alias-label-primary)}
@@ -348,6 +358,18 @@ async function postJSON(path, body) {
   if (!res.ok || !data) {
     // 保留服务端错误码：UI 需要据此区分「可重试」的失败（如 DSM_SESSION_BUSY
     // —— 会话正被 DSH 占用写权限，切走会话后原地重试即可）与重试也无用的错误。
+    const error = new Error((data && (data.error || data.message)) || `request failed (${res.status})`)
+    if (data && data.code) error.code = data.code
+    throw error
+  }
+  return data
+}
+
+// GET 版：只读路由（如 /mcp/rows）用，错误处理与 postJSON 同口径。
+async function getJSON(path) {
+  const res = await fetch(path, { headers: { accept: 'application/json' } })
+  const data = await res.json().catch(() => null)
+  if (!res.ok || !data) {
     const error = new Error((data && (data.error || data.message)) || `request failed (${res.status})`)
     if (data && data.code) error.code = data.code
     throw error
@@ -1357,6 +1379,12 @@ function SessionPanel({ workspacesSvc }) {
   const [openTags, setOpenTags] = useState(null)      // 展开标签编辑 sheet 的卡片 sessionId
   const [openTagMgr, setOpenTagMgr] = useState(false) // 标签管理 sheet
   const [qaStyleOpen, setQaStyleOpen] = useState(false) // v0.2.2 面板外观 sheet
+  // v0.5.5 MCP 服务器开关：只读写 profile 的 cordis.patch.yml，重启 DSH 后生效。
+  const [mcpOpen, setMcpOpen] = useState(false)
+  const [mcpRows, setMcpRows] = useState(null)
+  const [mcpBusy, setMcpBusy] = useState(false)
+  const [mcpErr, setMcpErr] = useState('')
+  const [mcpNote, setMcpNote] = useState('')
   // v0.2.4 问题3：外观偏好存 localStorage（非响应式），write 后以此 tick 强制
   // sheet 重读最新值，否则 select/滑杆显示卡在旧值。
   const [qaStyleTick, setQaStyleTick] = useState(0)
@@ -2650,6 +2678,25 @@ function SessionPanel({ workspacesSvc }) {
               <button type="button" className="archv-btn" aria-expanded={qaStyleOpen} title="快捷面板的主题预设与圆角/模糊/不透明度/宽度" onClick={() => setQaStyleOpen(!qaStyleOpen)}>
                 面板外观
               </button>
+              {/* v0.5.5：MCP 服务器开关（最小实现，直接改 profile 的 cordis.patch.yml）。 */}
+              <button
+                type="button"
+                className="archv-btn"
+                aria-expanded={mcpOpen}
+                title="启用 / 停用本机 profile 里的 MCP 服务器（重启 DSH 后生效）"
+                onClick={() => {
+                  const next = !mcpOpen
+                  setMcpOpen(next)
+                  if (!next) return
+                  setMcpBusy(true)
+                  setMcpErr('')
+                  setMcpNote('')
+                  getJSON('/archived-sessions/mcp/rows')
+                    .then((d) => setMcpRows(Array.isArray(d.rows) ? d.rows : []))
+                    .catch((e) => setMcpErr(String((e && e.message) || e)))
+                    .finally(() => setMcpBusy(false))
+                }}
+              >MCP 服务器</button>
               {aa.lastRunAt ? <span className="maint-note">上次检查 {fmtDate(aa.lastRunAt)}，归档 {aa.lastArchivedCount} 个</span> : <span className="maint-note">尚未检查</span>}
           </div>
 
@@ -2713,6 +2760,54 @@ function SessionPanel({ workspacesSvc }) {
               </div>
             )
           })()}
+
+          {/* v0.5.5 MCP 服务器开关 sheet：列出 profile 里的 MCP 行，一键启停。
+              改动写 cordis.patch.yml（服务端先落 .bak-mcpui-* 备份），重启 DSH 生效。 */}
+          {mcpOpen && (
+            <div className="mv-sheet" aria-label="MCP 服务器">
+              <div className="mv-sheet-head">
+                <h3 className="mv-sheet-title">MCP 服务器</h3>
+                <button type="button" className="mv-sheet-close" aria-label="关闭" onClick={() => setMcpOpen(false)}>×</button>
+              </div>
+              {mcpErr ? <div className="mcp-note mcp-err">{mcpErr}</div> : null}
+              {!mcpRows ? (
+                <div className="mcp-note">{mcpBusy ? '读取中…' : '尚未读取。'}</div>
+              ) : mcpRows.length === 0 ? (
+                <div className="mcp-note">这个 profile 的 cordis.patch.yml 里没有 MCP 行。</div>
+              ) : (
+                <div className="mcp-list">
+                  {mcpRows.map((r) => (
+                    <div className="mcp-row" key={r.id}>
+                      <div className="mcp-meta">
+                        <div className="mcp-name">{r.serverName || r.id}</div>
+                        <div className="mcp-sub">{r.id} · {r.transport || 'unknown'}{r.target ? ' · ' + r.target : ''}</div>
+                      </div>
+                      <button
+                        type="button"
+                        className={'archv-btn mcp-sw' + (r.enabled ? ' mcp-sw-on' : '')}
+                        aria-pressed={!!r.enabled}
+                        disabled={mcpBusy}
+                        onClick={async () => {
+                          setMcpBusy(true)
+                          setMcpErr('')
+                          try {
+                            const d = await postJSON('/archived-sessions/mcp/toggle', { id: r.id, enabled: !r.enabled })
+                            if (d && Array.isArray(d.rows)) setMcpRows(d.rows)
+                            setMcpNote(d && d.changed ? '已写入，重启 DSH 后生效。' : '状态未变化。')
+                          } catch (e) {
+                            setMcpErr(String((e && e.message) || e))
+                          } finally {
+                            setMcpBusy(false)
+                          }
+                        }}
+                      >{r.enabled ? '已启用' : '已停用'}</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="mcp-note">{mcpNote || '改动写入当前 profile 的 cordis.patch.yml（写入前自动备份为 .bak-mcpui-*），重启 DSH 后生效。'}</div>
+            </div>
+          )}
 
           {/* T4 标签管理 sheet：照自动归档/待移动队列的 mv-sheet 先例。
               每行 = 名字 / 用量 / 重命名（内联输入）/ 并入 select + 确认 / 删除。
@@ -5484,7 +5579,7 @@ export function apply(ctx) {
   // 同一能力也尝试注册为客户端 cordis 服务 'lyinSessions'（可用则用）。
   try {
     const api = {
-      version: '3.8.0',
+      version: '3.9.0',
       openSession(id) {
         const target = id === null || id === undefined ? '' : String(id)
         if (!target) return false

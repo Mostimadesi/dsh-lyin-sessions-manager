@@ -86,6 +86,17 @@ So held-open sessions get **deferred (queued) moves**:
 - **Results are no longer silent**: a background completion or a final give-up (5 consecutive non-lock failures) becomes a persisted notice, surfaced as a toast the next time a DSH page is open (give-ups include the reason). Notices stay on the server until acknowledged (up to 20, at most 7 days) — closing the page before the toast never loses one.
 - **To actually move an active session**: request the move (it queues), then **restart DSH and don't open that session first** — it completes a few seconds after startup. Pending entries survive restarts.
 
+### MCP server switches
+
+**Settings → Session Manager → maintenance row → "MCP servers"** lists every MCP row in the active profile's `cordis.patch.yml` and toggles them in place.
+
+- **One source of truth.** Unlike plugins that keep a separate `mcp-servers.json`, this reads and writes the very file DSH loads, so the two can never disagree.
+- **Disabling an item inside a `- insert:` block also comments out the block header.** That is the point: leaving `- insert:` live while every entry is commented out makes YAML parse it as `insert: null`, and the plugin marketplace then rejects the profile as an invalid config. The header stays live as long as the block still has an enabled entry.
+- **Enabling hoists the block header to column 0.** Hand-written profiles indent it (4 and 2 spaces on this machine), and an indented `- insert:` nests into the preceding entry's `config:` — also invalid.
+- Top-level rows are never commented out; disabling appends `- id: X` + `disabled: true` at the end of the file, which is how profiles natively turn plugins off.
+- Every write drops a `.bak-mcpui-<timestamp>` backup first. **Restart DSH to apply.**
+- This only lists and toggles. It does not add, delete, or edit command / args.
+
 ### Session formats v3 / v4 (DSH 0.1.5+ / 0.1.7+)
 
 DSH 0.1.5 upgrades the session log format to **v3**, and 0.1.7 upgrades it again to **v4**; the runtime performs the migration itself while reading:
@@ -204,6 +215,8 @@ lib/client.js      pre-built client (ModuleLoader CJS handshake)
 | POST | `/archived-sessions/auto-archive/settings` | Read or update the auto-archive policy `{ inactiveDays, skipStarred }`; reading lazily triggers the daily check |
 | POST | `/archived-sessions/auto-archive/run` | Run a one-off auto-archive check immediately (ignores the daily throttle) |
 | POST | `/archived-sessions/capabilities` | Report the persistence generation and per-action read/archive/trash/purge/cross-workspace-move capabilities |
+| GET | `/archived-sessions/mcp/rows` | List the MCP rows found in the active profile's `cordis.patch.yml` |
+| POST | `/archived-sessions/mcp/toggle` | `{ id, enabled }` — toggle one MCP row; backs the file up first, returns `needsRestart: true` |
 
 > Deleting a session moves it to the recycle bin by default; only "permanently delete" inside the recycle bin physically removes the log. Permanently deleted sessions are hidden forever on the client side so they don't reappear in the sidebar or "ungrouped" due to DSH runtime caching.
 

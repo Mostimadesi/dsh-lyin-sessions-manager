@@ -3,7 +3,7 @@
 > 写给「接手后续维护的新会话 / 新维护者」。目标是让你在不读 5000 行源码的前提下，
 > 20 分钟内能改一行、构建、验证、回滚。
 >
-> 最后更新：2026-11-13（v0.5.4 / package 3.8.0）
+> 最后更新：2026-11-14（v0.5.5 MCP 开关 / package 3.9.0）
 
 ---
 
@@ -14,7 +14,7 @@
 | 本机仓库路径 | `D:\DeepSeek Harness\workspace\plugins_helper\session-manager-unified\dsh-lyin-sessions-manager` |
 | 分支 / 远程 | `main`；`origin` = https://github.com/Mostimadesi/dsh-lyin-sessions-manager（公开），`upstream` = TOBYCAI/dsh-sessions-manager |
 | 插件包名 | `dsh-lyin-sessions-manager`（**改包名要同时改** `build.mjs` 的 ModuleLoader banner） |
-| package 版本 | `3.8.0`（上游 3.7.10 → 本分支因新增面板能力升 minor） |
+| package 版本 | `3.9.0`（上游 3.7.10 → 3.8.0 面板能力 → 3.9.0 加 MCP 开关） |
 | 目标宿主 | DSH **0.2.2-rc.1**（`D:\DeepSeek Harness`，nightly 通道） |
 | 构建 | `npm run build` → 产出 `lib/index.js` + `lib/client.js`（**产物要提交**） |
 | 测试 | `npm test`（= `node scripts/run-tests.mjs`，43 个测试文件） |
@@ -38,7 +38,7 @@ git commit -am "..." && npm run check:dist # 提交后再校验产物一致
 - 本仓库是**个人分支**：fork 后只改插件身份（`package.json` 的 name、`cordis.patch.yml` 的 id、`src/index.js` 的 `export const name`），**刻意保留**了路由前缀 `/archived-sessions`、`STATE_DIR`、`data-dsm-*` 类名、slot id —— 目的是让上游 rebase 尽量少冲突（见 §12）。
 - 另一个同类实现 `hkkz9522/dsh-session-manager` 只在 v0.1 调研阶段对照过（元数据层设计借鉴了它：标签 20/会话、优先级 1-5、备注 2000 字、待回看、API 认证门 fail-closed），**代码没有合并**。
 - 版本号有两套，别混：
-  - `package.json` 的 `3.8.0`：给 npm / 插件市场看。
+  - `package.json` 的 `3.9.0`：给 npm / 插件市场看。
   - commit message 里的 `v0.1` … `v0.5.4`：本分支的开发里程碑，只在 git log 里有意义。
 
 ---
@@ -54,6 +54,7 @@ src/
   api-auth.js           owner-only 认证门（createApiAuth → { check, wrap }）
   session-meta-index.js 元数据存储 meta-v1（priority/note/review）
   session-meta-cache.js meta 的内存缓存/批量读
+  mcp-rows.js           cordis.patch.yml 的 MCP 行解析与开关（文本手术，不引 YAML 库）
   tag-index.js          标签存储（20 个/会话，名称 ≤32 码点）
   handle-era-ops.js     SessionHandle 世代的操作适配（删除/恢复/移动）
   lineage.js            子代理血缘（origin === 'subagent' && parentSession）
@@ -91,7 +92,7 @@ cordis.patch.yml        插件对宿主的 patch 层（bundle.patch 指向它）
   - `src/index.js` → `lib/index.js`（ESM host）
   - `src/client/index.jsx` → `lib/client.js`（CJS，外层包 `window.__ModuleLoader__.load({ id: 'dsh-lyin-sessions-manager', factory … })`）
 - `__BUILD_STAMP__` 注入为 `${pkg.version}+${srcFingerprint}`，`lib/index.js` 里会出现一行
-  `var BUILD_STAMP = true ? "3.8.0+xxxxxxxx" : "dev";` —— **这是正常的**，每次 build 都会改这一行，提交它。
+  `var BUILD_STAMP = true ? "3.9.0+xxxxxxxx" : "dev";` —— **这是正常的**，每次 build 都会改这一行，提交它。
 - **历史事故**：`build.mjs` 的 ModuleLoader banner 里曾硬编码旧包名 `dsh-sessions-manager`，导致组合树按新名加载不到插件（`loaded without registering …`）。`check:dist` 抓不到这类问题，只有真实 web boot 能暴露。改包名时三处一起改：`package.json.name`、`cordis.patch.yml` 的 id、`build.mjs` banner。
 - `lib/` 必须提交：本机安装用 `link:`，宿主直接读工作树里的 `lib/`，不提交也不影响本机，但会让别人拿到跑不起来的包。
 
@@ -134,6 +135,8 @@ ctx.inject(['sidebarRightTabs'], (scope) => {
 - 所有路由包 `createApiAuth(ctx).wrap`：owner-only、fail-closed（无 `connection` 服务时 503、非 owner 401）。
 - 新增能力时**必须**走 `registerRoute`，否则绕过认证门。
 - 测试里为了免认证会设 `DSH_SESSIONS_MANAGER_NO_AUTH=1`（`scripts/run-tests.mjs` 预置）；`tests/meta-routes.test.js` 会自己删掉这个变量以走真实门。
+- MCP 两条：`GET /archived-sessions/mcp/rows`（列出现有 MCP 行）与 `POST /archived-sessions/mcp/toggle`（`{ id, enabled }`）。写文件前落 `.bak-mcpui-<ts>` 备份，返回 `{ ok, changed, reason, backup, needsRestart, rows }`。
+- **`tests/mcp-routes.test.js` 的 503 用例必须同时删 `DSH_PROFILE_DIR` 与 `DSH_PROFILE`**：本机真实环境有 `DSH_PROFILE=desktop`，只删前者会让 `resolveProfileDir` 回退到 `~/.dsh/profiles/desktop` 并命中真实文件，用例就测不到 503 分支。
 
 ### 4.4 宿主事实与坑
 
@@ -337,9 +340,11 @@ localStorage（浏览器侧）：
 | 1 | 「收藏 / 待回看 / 优先级」在「已标记」区是否拆成三小行 / 改名「我标注过的」/ 保持合并 | 三个方案已给用户，**用户未选** | 先别动，等用户拍板 |
 | 2 | 右栏（侧边栏）形态的滚动/高度是否真的生效 | 已加 `dsmFitPanel`，但用户当时会话数不够没测到；`panel:fit` 日志待下次打开面板确认 | 看 `avail` 与 `ch/sh` 是否合理 |
 | 3 | 工作区归档 / 可见性（上游有、本分支未移植） | v0.2 就决定推迟 | 若用户要，参考上游 `hkkz9522` 版实现 |
-| 4 | `window.__dshSessionsManager.version` 已同步为 `3.8.0` | 已改 | 以后升 package 版本时顺手同步这一行（`src/client/index.jsx` 的 `version:` 字段） |
+| 4 | `window.__dshSessionsManager.version` 已同步为 `3.9.0` | 已改 | 以后升 package 版本时顺手同步这一行（`src/client/index.jsx` 的 `version:` 字段） |
 | 5 | `dsmFitPanel` 无单测（依赖 DOM） | 靠日志验证 | 若要测，抽纯函数算 `avail` 再测 |
 | 6 | 上游若有新版格式 | 未跟踪 | 见 §12 |
+| 7 | MCP 服务器开关（`/archived-sessions/mcp/*` + 维护栏 sheet） | 已实现并通过单测（`tests/mcp-rows.test.js` 13 项 + `tests/mcp-routes.test.js` 2 项） | 真机点一遍；确认重启后 MCP 连接按新开关状态建立 |
+| 8 | `dsh-mcp-manager` 是否删除 | 用户计划整合完成后移除，当前仍在 profile 依赖里且被 `disabled: true` 停用 | 用户自行 `dsh plugin --profile desktop remove dsh-mcp-manager`；本插件的 MCP 能力**不依赖它** |
 
 ---
 

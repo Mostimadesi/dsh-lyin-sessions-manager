@@ -32,6 +32,7 @@ import { detectCapabilities, requireCapability } from './compat/capabilities.js'
 import { pathOwnsSession } from './path-guard.js'
 import { purgeSessionArtifacts, moveSessionToCwd } from './handle-era-ops.js'
 import { classifyLineage, emptyScanCandidate, isEmptyEventTypes, subagentDescendantsOf, EMPTY_DECODE_LIMIT } from './lineage.js'
+import { PATCH_FILE_NAME, parsePatchRows, togglePatchRow, resolveProfileDir } from './mcp-rows.js'
 
 // 构建指纹：build.mjs 以 define 在编译期注入；直接以源码运行（测试）时为 'dev'。
 // 用途：capabilities 带出 buildStamp，一眼判断「运行中的 host 是不是这份构建」——
@@ -2615,6 +2616,59 @@ export function apply(ctx) {
             try { out[sid] = await lastTurnKindOf(sid) } catch (e) { out[sid] = null }
           }
           json(res, { ok: true, kinds: out })
+        } catch (e) {
+          json(res, { ok: false, code: e && e.code, error: String((e && e.message) || e) }, errorStatus(e))
+        }
+      },
+    })
+
+    // ---- MCP 服务器开关（最小实现，不依赖 dsh-mcp-manager）--------------
+    // 本机在用的 MCP 是 profile 里 `@deepseek-ai/dsh-mcp-client` 的行，而不是
+    // mcp-servers.json 条目：启用 = 顶层行，禁用 = `#OFF#` 注释块或末尾覆盖行。
+    // 这里只读写 profile 的 cordis.patch.yml；改完需重启 DSH 才生效（Web 面
+    // 不热重载该文件），所以响应固定带 needsRestart: true。
+    registerRoute({
+      kind: 'exact',
+      path: '/archived-sessions/mcp/rows',
+      handler: async (req, res) => {
+        try {
+          const dir = resolveProfileDir()
+          if (!dir) return json(res, { ok: false, code: 'DSM_MCP_NO_PROFILE', error: 'cannot locate the active profile directory' }, 503)
+          const file = join(dir, PATCH_FILE_NAME)
+          const text = await readFile(file, 'utf8')
+          json(res, { ok: true, profile: dir, file, rows: parsePatchRows(text).rows, needsRestart: true })
+        } catch (e) {
+          json(res, { ok: false, code: e && e.code, error: String((e && e.message) || e) }, errorStatus(e))
+        }
+      },
+    })
+
+    // body: { id: string, enabled: boolean }
+    // 只允许切换解析出来的 MCP 行；写入前先落一份 .bak-mcpui-<时间戳> 备份。
+    registerRoute({
+      kind: 'exact',
+      path: '/archived-sessions/mcp/toggle',
+      handler: async (req, res) => {
+        try {
+          const body = await readJsonBody(req)
+          const id = body && typeof body.id === 'string' ? body.id.trim() : ''
+          const enabled = body && typeof body.enabled === 'boolean' ? body.enabled : null
+          if (!id || enabled === null) return json(res, { ok: false, code: 'DSM_MCP_BAD_INPUT', error: 'body: { id: string, enabled: boolean }' }, 400)
+          const dir = resolveProfileDir()
+          if (!dir) return json(res, { ok: false, code: 'DSM_MCP_NO_PROFILE', error: 'cannot locate the active profile directory' }, 503)
+          const file = join(dir, PATCH_FILE_NAME)
+          const text = await readFile(file, 'utf8')
+          if (!parsePatchRows(text).rows.some((r) => r.id === id)) {
+            return json(res, { ok: false, code: 'DSM_MCP_UNKNOWN_ROW', error: 'not an MCP row: ' + id }, 400)
+          }
+          const out = togglePatchRow(text, { id, enabled })
+          let backup = null
+          if (out.changed) {
+            backup = file + '.bak-mcpui-' + new Date().toISOString().replace(/[:.]/g, '-')
+            await writeFile(backup, text, 'utf8')
+            await writeFile(file, out.text, 'utf8')
+          }
+          json(res, { ok: true, changed: out.changed, reason: out.reason || null, backup, needsRestart: true, rows: parsePatchRows(out.text).rows })
         } catch (e) {
           json(res, { ok: false, code: e && e.code, error: String((e && e.message) || e) }, errorStatus(e))
         }
