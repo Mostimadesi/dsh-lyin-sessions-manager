@@ -1,6 +1,6 @@
 # dsh-lyin-sessions-manager
 
-![version](https://img.shields.io/badge/version-3.9.0-facc15?style=flat-square)
+![version](https://img.shields.io/badge/version-3.10.0-facc15?style=flat-square)
 ![license](https://img.shields.io/badge/license-MIT-3b82f6?style=flat-square)
 ![DSH plugin](https://img.shields.io/badge/DSH-plugin-4d6bfe?style=flat-square)
 
@@ -161,6 +161,22 @@ DSH 0.1.5 起每个会话日志有**单写者锁**：会话一旦被打开（包
 - 顶层行（不在 `- insert:` 块里）关掉时不注释，改为在文件末尾追加 `- id: X` + `disabled: true`——profile 原生就这么关插件，语义最稳。
 - 每次写入前落 `.bak-mcpui-<时间戳>` 备份，改完**重启 DSH 生效**。
 - 只识别、只开关；不新增、不删除、不编辑 command / args。要加新的 MCP 服务器仍然手写 `cordis.patch.yml`。
+
+### Skill 列表（本分支新增）
+
+设置 → 会话管理 → 维护栏 →「Skill 列表」，扫描并管理本机的 skill。与 MCP 开关不同，**skill 在 `cordis.patch.yml` 里没有对应的行**——它的发现完全靠文件系统扫描，所以这里不做行开关，改的是每个 `SKILL.md` 的 frontmatter。
+
+- **三态开关**（互斥，写两个 frontmatter 布尔键）：
+  - `启用`：两个键都不写 → 模型可见、`/名称` 可用。
+  - `仅 / 调用`：写 `disable-model-invocation: true` → 模型看不到、也调不了 `skill` 工具，但 `/名称` 仍然可用。
+  - `停用`：再写 `user-invocable: false` → 两者都不可用，文件保留。
+- **不用重启。** 宿主 `skill-filesystem` 用 chokidar 监听这些目录，改完 `SKILL.md` 后下一次对话即可生效。
+- **扫描根**（rank 小的优先，同名 skill 只显示胜出的那个）：项目 `<cwd>/.dsh/skills` → 项目 `<cwd>/.agents/skills` → `$DSH_HOME/skills` → `~/.agents/skills` → 内置（只读）。
+- **文本手术，不重写 frontmatter。** 只在闭合 `---` 前增删那两行，正文与 `metadata` 等自定义键逐字节不动；目标状态已达成时直接返回原文（不写盘、不产生备份）。
+- 每次写入前落 `.bak-skill-<时间戳>` 备份；删除是**直接删目录**（有二次确认，不可恢复）。
+- **导入导出自带 zip 读写**（`src/zip-lite.js`，只用 Node 自带 `zlib`，零依赖），支持 `.zip` 与从磁盘目录复制；写出侧就拒绝 `..`、前导 `/`、空名。
+- 包内的 skill（`node_modules/*/skills/*`）标为「只读」——它们没被任何 provider 注册，重装即覆盖。
+- 坏目录（缺 `SKILL.md`、frontmatter 不合法、超过 512 KiB）**静默跳过**，在「已忽略的目录」折叠区里给出原因。
 
 ## 截图
 

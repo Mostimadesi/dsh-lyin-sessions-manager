@@ -217,6 +217,12 @@ lib/client.js      pre-built client (ModuleLoader CJS handshake)
 | POST | `/archived-sessions/capabilities` | Report the persistence generation and per-action read/archive/trash/purge/cross-workspace-move capabilities |
 | GET | `/archived-sessions/mcp/rows` | List the MCP rows found in the active profile's `cordis.patch.yml` |
 | POST | `/archived-sessions/mcp/toggle` | `{ id, enabled }` — toggle one MCP row; backs the file up first, returns `needsRestart: true` |
+| GET/POST | `/archived-sessions/skills/list` | Scan the skill roots (`<proj>/.dsh/skills`, `<proj>/.agents/skills`, `$DSH_HOME/skills`, `~/.agents/skills`, bundled) and return each skill's three-state mode |
+| POST | `/archived-sessions/skills/mode` | `{ dir, mode, name? }` — `on` / `clipboard` / `off`; rewrites the SKILL.md frontmatter, backing the file up first; takes effect on the next turn (no restart) |
+| GET | `/archived-sessions/skills/export?dir=` | Download one skill as a `.zip` |
+| POST | `/archived-sessions/skills/import?root=&overwrite=1` | Import a `.zip` (body = the archive) into one writable skill root |
+| POST | `/archived-sessions/skills/import-dir` | `{ srcDir, root, overwrite }` — copy a skill directory in from disk |
+| POST | `/archived-sessions/skills/delete` | `{ dir, name? }` — delete one skill directory (irreversible; returns a file digest) |
 
 > Deleting a session moves it to the recycle bin by default; only "permanently delete" inside the recycle bin physically removes the log. Permanently deleted sessions are hidden forever on the client side so they don't reappear in the sidebar or "ungrouped" due to DSH runtime caching.
 

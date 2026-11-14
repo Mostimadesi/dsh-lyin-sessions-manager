@@ -1,4 +1,4 @@
-﻿// dsh-lyin-sessions-manager — host half.
+// dsh-lyin-sessions-manager — host half.
 //
 // Serves /archived-sessions/* JSON routes (list / restore / restore-many /
 // delete / delete-many / sessions / workspaces / move) over the host
@@ -33,6 +33,18 @@ import { pathOwnsSession } from './path-guard.js'
 import { purgeSessionArtifacts, moveSessionToCwd } from './handle-era-ops.js'
 import { classifyLineage, emptyScanCandidate, isEmptyEventTypes, subagentDescendantsOf, EMPTY_DECODE_LIMIT } from './lineage.js'
 import { PATCH_FILE_NAME, parsePatchRows, togglePatchRow, resolveProfileDir } from './mcp-rows.js'
+import {
+  SKILL_MODES,
+  SKILL_MODE_LABEL,
+  listSkills,
+  listBrokenDirs,
+  setSkillMode,
+  exportSkillZip,
+  importSkillZip,
+  importSkillDir,
+  deleteSkillDir,
+  skillRoots,
+} from './skill-rows.js'
 
 // 构建指纹：build.mjs 以 define 在编译期注入；直接以源码运行（测试）时为 'dev'。
 // 用途：capabilities 带出 buildStamp，一眼判断「运行中的 host 是不是这份构建」——
@@ -98,6 +110,18 @@ async function readJsonBody(req) {
   } catch {
     return null
   }
+}
+
+// 二进制上传（skill zip 导入用）。超上限时停止累积并返回 null，绝不无界读。
+async function readBinaryBody(req, maxBytes = 1 << 20) {
+  const chunks = []
+  let total = 0
+  for await (const chunk of req) {
+    total += chunk.length
+    if (total > maxBytes) return null
+    chunks.push(chunk)
+  }
+  return chunks.length ? Buffer.concat(chunks) : null
 }
 
 function parseIds(body) {
@@ -2669,6 +2693,151 @@ export function apply(ctx) {
             await writeFile(file, out.text, 'utf8')
           }
           json(res, { ok: true, changed: out.changed, reason: out.reason || null, backup, needsRestart: true, rows: parsePatchRows(out.text).rows })
+        } catch (e) {
+          json(res, { ok: false, code: e && e.code, error: String((e && e.message) || e) }, errorStatus(e))
+        }
+      },
+    })
+
+    // ---- Skill 管理（v0.6.1）--------------------------------------------
+    // skill 在 cordis.patch.yml 里没有配置行（宿主按目录扫描），所以不能用 MCP
+    // 那套「注释配置行」的做法。开关落在 SKILL.md 的 frontmatter：
+    //   on        → 两个键都不写（默认全开）
+    //   clipboard → disable-model-invocation: true（模型看不到，/<name> 仍可用）
+    //   off       → 再加 user-invocable: false（完全停用）
+    // 宿主 dsh-skill-filesystem 用 chokidar 盯这些目录，改完下一次 agent step
+    // 即生效，**不需要重启**，所以响应里 needsRestart: false。
+    registerRoute({
+      kind: 'exact',
+      path: '/archived-sessions/skills/list',
+      handler: async (req, res) => {
+        try {
+          const cwd = process.cwd()
+          const { skills, shadowed, roots } = listSkills({ cwd })
+          json(res, {
+            ok: true,
+            skills,
+            shadowed,
+            roots,
+            broken: listBrokenDirs({ cwd }),
+            modes: SKILL_MODES,
+            modeLabels: SKILL_MODE_LABEL,
+            needsRestart: false,
+          })
+        } catch (e) {
+          json(res, { ok: false, code: e && e.code, error: String((e && e.message) || e) }, errorStatus(e))
+        }
+      },
+    })
+
+    // body: { dir: string, mode: 'on'|'clipboard'|'off', name?: string }
+    // dir 必须是本次扫描出来的某个 skill 目录（防任意路径写入）。
+    registerRoute({
+      kind: 'exact',
+      path: '/archived-sessions/skills/mode',
+      handler: async (req, res) => {
+        try {
+          const body = await readJsonBody(req)
+          const dir = body && typeof body.dir === 'string' ? body.dir.trim() : ''
+          const mode = body && typeof body.mode === 'string' ? body.mode : ''
+          const name = body && typeof body.name === 'string' ? body.name : ''
+          if (!dir || !SKILL_MODE_LABEL[mode]) {
+            return json(res, { ok: false, code: 'DSM_SKILL_BAD_INPUT', error: "body: { dir: string, mode: 'on'|'clipboard'|'off' }" }, 400)
+          }
+          const known = listSkills({ cwd: process.cwd() }).skills.some((s) => s.dir === dir)
+          if (!known) return json(res, { ok: false, code: 'DSM_SKILL_UNKNOWN', error: 'not a scanned skill directory: ' + dir }, 400)
+          const out = setSkillMode(dir, mode, { expectName: name })
+          json(res, { ok: true, ...out, needsRestart: false, skills: listSkills({ cwd: process.cwd() }).skills })
+        } catch (e) {
+          json(res, { ok: false, code: e && e.code, error: String((e && e.message) || e) }, errorStatus(e))
+        }
+      },
+    })
+
+    // 导出：返回 zip 二进制（GET ?dir=...）。
+    registerRoute({
+      kind: 'exact',
+      path: '/archived-sessions/skills/export',
+      handler: async (req, res) => {
+        try {
+          const url = new URL(req.url || '/', 'http://localhost')
+          const dir = (url.searchParams.get('dir') || '').trim()
+          const known = dir ? listSkills({ cwd: process.cwd() }).skills.find((s) => s.dir === dir) : null
+          if (!known) return json(res, { ok: false, code: 'DSM_SKILL_UNKNOWN', error: 'not a scanned skill directory' }, 400)
+          const buf = exportSkillZip(dir, { dirName: known.name })
+          res.writeHead(200, {
+            'content-type': 'application/zip',
+            'content-length': String(buf.length),
+            'content-disposition': `attachment; filename="${known.name}.zip"`,
+            'cache-control': 'no-store',
+          })
+          res.end(buf)
+        } catch (e) {
+          json(res, { ok: false, code: e && e.code, error: String((e && e.message) || e) }, errorStatus(e))
+        }
+      },
+    })
+
+    // 导入：body 为 zip 二进制（content-type: application/zip），写入 ?root=<根路径>。
+    // root 只允许是 skillRoots() 里列出的根，避免往任意目录写。
+    registerRoute({
+      kind: 'exact',
+      path: '/archived-sessions/skills/import',
+      handler: async (req, res) => {
+        try {
+          const url = new URL(req.url || '/', 'http://localhost')
+          const rootDir = (url.searchParams.get('root') || '').trim()
+          const overwrite = url.searchParams.get('overwrite') === '1'
+          const allowed = skillRoots({ cwd: process.cwd() }).filter((r) => r.scope !== 'bundled')
+          if (!allowed.some((r) => r.path === rootDir)) {
+            return json(res, { ok: false, code: 'DSM_SKILL_BAD_ROOT', error: 'root must be one of the scanned skill roots' }, 400)
+          }
+          const buf = await readBinaryBody(req, 32 * 1024 * 1024)
+          if (!buf) return json(res, { ok: false, code: 'DSM_SKILL_BAD_ARCHIVE', error: 'empty body or exceeds 32 MiB' }, 400)
+          const out = importSkillZip(buf, rootDir, { overwrite })
+          json(res, { ok: true, name: out.name, dir: out.dir, skill: out.skill, needsRestart: false, skills: listSkills({ cwd: process.cwd() }).skills })
+        } catch (e) {
+          json(res, { ok: false, code: e && e.code, error: String((e && e.message) || e) }, errorStatus(e))
+        }
+      },
+    })
+
+    // 从本机目录导入：body { srcDir, root, overwrite? }
+    registerRoute({
+      kind: 'exact',
+      path: '/archived-sessions/skills/import-dir',
+      handler: async (req, res) => {
+        try {
+          const body = await readJsonBody(req)
+          const srcDir = body && typeof body.srcDir === 'string' ? body.srcDir.trim() : ''
+          const rootDir = body && typeof body.root === 'string' ? body.root.trim() : ''
+          const overwrite = !!(body && body.overwrite)
+          const allowed = skillRoots({ cwd: process.cwd() }).filter((r) => r.scope !== 'bundled')
+          if (!srcDir || !allowed.some((r) => r.path === rootDir)) {
+            return json(res, { ok: false, code: 'DSM_SKILL_BAD_INPUT', error: 'body: { srcDir: string, root: <scanned root> }' }, 400)
+          }
+          const out = importSkillDir(srcDir, rootDir, { overwrite })
+          json(res, { ok: true, name: out.name, dir: out.dir, skill: out.skill, needsRestart: false, skills: listSkills({ cwd: process.cwd() }).skills })
+        } catch (e) {
+          json(res, { ok: false, code: e && e.code, error: String((e && e.message) || e) }, errorStatus(e))
+        }
+      },
+    })
+
+    // 删除：body { dir, name }。只删扫描出来的 skill 目录。
+    registerRoute({
+      kind: 'exact',
+      path: '/archived-sessions/skills/delete',
+      handler: async (req, res) => {
+        try {
+          const body = await readJsonBody(req)
+          const dir = body && typeof body.dir === 'string' ? body.dir.trim() : ''
+          const name = body && typeof body.name === 'string' ? body.name : ''
+          const known = dir ? listSkills({ cwd: process.cwd() }).skills.find((s) => s.dir === dir) : null
+          if (!known) return json(res, { ok: false, code: 'DSM_SKILL_UNKNOWN', error: 'not a scanned skill directory' }, 400)
+          if (name && known.name !== name) return json(res, { ok: false, code: 'DSM_SKILL_MISMATCH', error: 'name mismatch' }, 400)
+          const out = deleteSkillDir(dir)
+          json(res, { ok: true, ...out, needsRestart: false, skills: listSkills({ cwd: process.cwd() }).skills })
         } catch (e) {
           json(res, { ok: false, code: e && e.code, error: String((e && e.message) || e) }, errorStatus(e))
         }

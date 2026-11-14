@@ -249,6 +249,17 @@ body[data-ds-dark-theme] .archv{color-scheme:dark}
 .mcp-sw-on{color:var(--dsw-alias-state-business-primary);border-color:var(--dsw-alias-state-business-primary)}
 .mcp-note{font-size:11px;line-height:1.5;color:var(--dsw-alias-label-tertiary)}
 .mcp-err{color:var(--dsw-alias-state-error-primary)}
+.skill-row{flex-wrap:wrap;gap:8px}
+.skill-seg{width:auto;flex:none}
+.skill-seg .mv-segbtn{min-height:26px;padding:0 9px;font-size:11.5px}
+.skill-act{min-width:auto;padding:0 9px;font-size:11.5px}
+.skill-danger:hover:not(:disabled){color:var(--dsw-alias-state-error-primary);border-color:var(--dsw-alias-state-error-primary)}
+.skill-tag{margin-left:6px;padding:1px 5px;border-radius:5px;font-size:10px;font-weight:500;color:var(--dsw-alias-label-tertiary);background:var(--dsw-alias-fill-elevated)}
+.skill-import{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.skill-root{min-height:28px;max-width:100%;padding:0 8px;border:1px solid var(--dsw-alias-border-l2);border-radius:7px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);font-size:11.5px}
+.skill-broken{font-size:11px}
+.skill-broken summary{cursor:pointer}
+.skill-broken-row{padding-left:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .mv-seg{display:flex;gap:2px;padding:2px;background:var(--dsw-alias-fill-elevated);border:1px solid var(--dsw-alias-border-l2);border-radius:var(--dsm-radius-sheet);width:100%}
 .mv-segbtn{appearance:none;flex:1;min-height:30px;padding:0 12px;border:none;background:transparent;color:var(--dsw-alias-label-secondary);border-radius:8px;font-size:12px;font-weight:500;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px}
 .mv-segbtn:hover:not(:disabled){color:var(--dsw-alias-label-primary)}
@@ -1385,6 +1396,14 @@ function SessionPanel({ workspacesSvc }) {
   const [mcpBusy, setMcpBusy] = useState(false)
   const [mcpErr, setMcpErr] = useState('')
   const [mcpNote, setMcpNote] = useState('')
+  // v0.6.1：skill 列表管理（三态开关 + 导出/导入/删除，直接读写 SKILL.md 的 frontmatter）。
+  const [skillOpen, setSkillOpen] = useState(false)
+  const [skillData, setSkillData] = useState(null)
+  const [skillBusy, setSkillBusy] = useState(false)
+  const [skillErr, setSkillErr] = useState('')
+  const [skillNote, setSkillNote] = useState('')
+  const [skillImportRoot, setSkillImportRoot] = useState('')
+  const skillFileRef = useRef(null)
   // v0.2.4 问题3：外观偏好存 localStorage（非响应式），write 后以此 tick 强制
   // sheet 重读最新值，否则 select/滑杆显示卡在旧值。
   const [qaStyleTick, setQaStyleTick] = useState(0)
@@ -2697,6 +2716,29 @@ function SessionPanel({ workspacesSvc }) {
                     .finally(() => setMcpBusy(false))
                 }}
               >MCP 服务器</button>
+              {/* v0.6.1：skill 列表（三态开关 + 导入导出），改 SKILL.md 的 frontmatter，宿主即时生效。 */}
+              <button
+                type="button"
+                className="archv-btn"
+                aria-expanded={skillOpen}
+                title="启用 / 部分停用 / 停用本机扫描到的 skill，也可导出 zip、导入、删除"
+                onClick={() => {
+                  const next = !skillOpen
+                  setSkillOpen(next)
+                  if (!next) return
+                  setSkillBusy(true)
+                  setSkillErr('')
+                  setSkillNote('')
+                  getJSON('/archived-sessions/skills/list')
+                    .then((d) => {
+                      setSkillData(d)
+                      const writable = (d.roots || []).filter((r) => r.scope !== 'bundled')
+                      setSkillImportRoot((prev) => prev || (writable[0] && writable[0].path) || '')
+                    })
+                    .catch((e) => setSkillErr(String((e && e.message) || e)))
+                    .finally(() => setSkillBusy(false))
+                }}
+              >Skill 列表{skillData && Array.isArray(skillData.skills) ? ` (${skillData.skills.length})` : ''}</button>
               {aa.lastRunAt ? <span className="maint-note">上次检查 {fmtDate(aa.lastRunAt)}，归档 {aa.lastArchivedCount} 个</span> : <span className="maint-note">尚未检查</span>}
           </div>
 
@@ -2806,6 +2848,156 @@ function SessionPanel({ workspacesSvc }) {
                 </div>
               )}
               <div className="mcp-note">{mcpNote || '改动写入当前 profile 的 cordis.patch.yml（写入前自动备份为 .bak-mcpui-*），重启 DSH 后生效。'}</div>
+            </div>
+          )}
+
+          {/* v0.6.1 skill 列表 sheet：三态开关写 frontmatter（服务端先落 .bak-skill-* 备份），
+              宿主 watch 到文件变化后下一次 agent step 即生效，不需要重启。
+              只列 skillRoots() 扫到的目录；包内（node_modules / bundled）标为只读。 */}
+          {skillOpen && (
+            <div className="mv-sheet" aria-label="Skill 列表">
+              <div className="mv-sheet-head">
+                <h3 className="mv-sheet-title">Skill 列表{skillData ? ` · ${skillData.skills.length}` : ''}</h3>
+                <button type="button" className="mv-sheet-close" aria-label="关闭" onClick={() => setSkillOpen(false)}>×</button>
+              </div>
+              {skillErr ? <div className="mcp-note mcp-err">{skillErr}</div> : null}
+              {!skillData ? (
+                <div className="mcp-note">{skillBusy ? '读取中…' : '尚未读取。'}</div>
+              ) : skillData.skills.length === 0 ? (
+                <div className="mcp-note">没有扫描到 skill。</div>
+              ) : (
+                <div className="mcp-list">
+                  {skillData.skills.map((s) => {
+                    const segs = skillData.modes.map((m) => ({ m, label: skillData.modeLabels[m] }))
+                    return (
+                      <div className="mcp-row skill-row" key={s.dir}>
+                        <div className="mcp-meta">
+                          <div className="mcp-name">{s.name}{!s.writable ? <span className="skill-tag">只读</span> : null}</div>
+                          <div className="mcp-sub" title={s.dir}>{s.rootLabel}{s.description ? ` · ${s.description}` : ''}</div>
+                        </div>
+                        <div className="mv-seg skill-seg" role="group" aria-label={`${s.name} 的启用状态`}>
+                          {segs.map((x) => (
+                            <button
+                              key={x.m}
+                              type="button"
+                              className={'mv-segbtn' + (s.mode === x.m ? ' mv-segbtn-on' : '')}
+                              aria-pressed={s.mode === x.m}
+                              disabled={skillBusy || !!!s.writable}
+                              onClick={async () => {
+                                setSkillBusy(true)
+                                setSkillErr('')
+                                try {
+                                  const d = await postJSON('/archived-sessions/skills/mode', { dir: s.dir, mode: x.m, name: s.name })
+                                  if (d && Array.isArray(d.skills)) setSkillData((prev) => prev ? { ...prev, skills: d.skills } : prev)
+                                  setSkillNote(d && d.changed ? `「${s.name}」→ ${skillData.modeLabels[x.m]}，已生效。` : '状态未变化。')
+                                } catch (e) {
+                                  setSkillErr(String((e && e.message) || e))
+                                } finally {
+                                  setSkillBusy(false)
+                                }
+                              }}
+                            >{x.label}</button>
+                          ))}
+                        </div>
+                        <button
+                          type="button"
+                          className="archv-btn skill-act"
+                          disabled={skillBusy}
+                          title="导出为 zip"
+                          onClick={() => {
+                            const url = `/archived-sessions/skills/export?dir=${encodeURIComponent(s.dir)}`
+                            const a = document.createElement('a')
+                            a.href = url
+                            a.download = `${s.dirName || s.name}.zip`
+                            document.body.appendChild(a)
+                            a.click()
+                            a.remove()
+                            setSkillNote(`已开始导出 ${s.name}.zip`)
+                          }}
+                        >导出</button>
+                        <button
+                          type="button"
+                          className="archv-btn skill-act skill-danger"
+                          disabled={skillBusy || !!!s.writable}
+                          title="删除这个 skill 目录（不可恢复）"
+                          onClick={async () => {
+                            if (!window.confirm(`删除 skill「${s.name}」？
+
+目录：${s.dir}
+
+这会直接删掉磁盘上的整个目录，不可恢复。`)) return
+                            setSkillBusy(true)
+                            setSkillErr('')
+                            try {
+                              const d = await postJSON('/archived-sessions/skills/delete', { dir: s.dir, name: s.name })
+                              if (d && Array.isArray(d.skills)) setSkillData((prev) => prev ? { ...prev, skills: d.skills } : prev)
+                              setSkillNote(`已删除「${s.name}」（${d.files} 个文件）。`)
+                            } catch (e) {
+                              setSkillErr(String((e && e.message) || e))
+                            } finally {
+                              setSkillBusy(false)
+                            }
+                          }}
+                        >删除</button>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+              {skillData ? (
+                <div className="skill-import">
+                  <span className="mcp-note">导入 zip 到</span>
+                  <select
+                    className="skill-root"
+                    value={skillImportRoot}
+                    onChange={(e) => setSkillImportRoot(e.target.value)}
+                    disabled={skillBusy}
+                  >
+                    {(skillData.roots || []).filter((r) => r.scope !== 'bundled').map((r) => (
+                      <option key={r.path} value={r.path}>{r.label || r.path}</option>
+                    ))}
+                  </select>
+                  <input
+                    ref={skillFileRef}
+                    type="file"
+                    accept=".zip,application/zip"
+                    style={{ display: 'none' }}
+                    onChange={async (e) => {
+                      const file = e.target.files && e.target.files[0]
+                      e.target.value = ''
+                      if (!file || !skillImportRoot) return
+                      setSkillBusy(true)
+                      setSkillErr('')
+                      try {
+                        const buf = await file.arrayBuffer()
+                        const res = await fetch(`/archived-sessions/skills/import?root=${encodeURIComponent(skillImportRoot)}&overwrite=1`, {
+                          method: 'POST',
+                          headers: { 'content-type': 'application/zip' },
+                          body: buf,
+                        })
+                        const d = await res.json().catch(() => null)
+                        if (!res.ok || !d || d.ok === false) throw new Error((d && (d.error || d.message)) || `导入失败 (${res.status})`)
+                        if (Array.isArray(d.skills)) setSkillData((prev) => prev ? { ...prev, skills: d.skills } : prev)
+                        setSkillNote(`已导入「${d.name}」。`)
+                      } catch (err) {
+                        setSkillErr(String((err && err.message) || err))
+                      } finally {
+                        setSkillBusy(false)
+                      }
+                    }}
+                  />
+                  <button type="button" className="archv-btn" disabled={skillBusy || !skillImportRoot} onClick={() => skillFileRef.current && skillFileRef.current.click()}>选择 zip 导入</button>
+                </div>
+              ) : null}
+              {skillData && skillData.broken && skillData.broken.length ? (
+                <details className="skill-broken">
+                  <summary className="mcp-note">已忽略的目录（{skillData.broken.length}）</summary>
+                  {skillData.broken.map((b) => (
+                    <div className="mcp-note skill-broken-row" key={b.dir} title={b.dir}>{b.rootLabel || b.dir} · {b.reason}</div>
+                  ))}
+                </details>
+              ) : null}
+              <div className="mcp-note">{skillNote || '三态：启用 / 仅 / 调用（模型看不到，斜杠命令仍可用）/ 停用（模型与斜杠都不可用）。改动写 SKILL.md 的 frontmatter，写入前自动备份为 .bak-skill-*；宿主监听文件变化，下一次对话即生效。'}</div>
             </div>
           )}
 
@@ -5579,7 +5771,7 @@ export function apply(ctx) {
   // 同一能力也尝试注册为客户端 cordis 服务 'lyinSessions'（可用则用）。
   try {
     const api = {
-      version: '3.9.0',
+      version: '3.10.0',
       openSession(id) {
         const target = id === null || id === undefined ? '' : String(id)
         if (!target) return false
