@@ -1,6 +1,6 @@
 # dsh-lyin-sessions-manager
 
-![version](https://img.shields.io/badge/version-3.10.1-facc15?style=flat-square)
+![version](https://img.shields.io/badge/version-3.10.2-facc15?style=flat-square)
 ![license](https://img.shields.io/badge/license-MIT-3b82f6?style=flat-square)
 ![DSH plugin](https://img.shields.io/badge/DSH-plugin-4d6bfe?style=flat-square)
 

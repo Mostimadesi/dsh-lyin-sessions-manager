@@ -8,7 +8,7 @@
 // session persistence, physically removes a session's log file on delete, and
 // relocates a conversation (session) between workspaces on move.
 import { appendFile, mkdir, readFile, readdir, realpath, rename, rm, stat, unlink, writeFile } from 'node:fs/promises'
-import { basename, dirname, isAbsolute, join } from 'node:path'
+import { basename, dirname, isAbsolute, join, resolve as resolvePath, sep as pathSep } from 'node:path'
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { rewriteFrame0CwdInMemory, scanZstdFrames } from './zstd-frame.js'
@@ -2744,8 +2744,13 @@ export function apply(ctx) {
           if (!dir || !SKILL_MODE_LABEL[mode]) {
             return json(res, { ok: false, code: 'DSM_SKILL_BAD_INPUT', error: "body: { dir: string, mode: 'on'|'clipboard'|'off' }" }, 400)
           }
-          const known = listSkills({ cwd: process.cwd() }).skills.some((s) => s.dir === dir)
+          const known = listSkills({ cwd: process.cwd() }).skills.find((s) => s.dir === dir)
           if (!known) return json(res, { ok: false, code: 'DSM_SKILL_UNKNOWN', error: 'not a scanned skill directory: ' + dir }, 400)
+          // 客户端会给只读行禁用按钮，但那是 UI；服务端必须自己拒，
+          // 否则一条 owner 请求就能改掉宿主包里的官方 skill。
+          if (known.writable === false) {
+            return json(res, { ok: false, code: 'DSM_SKILL_READONLY', error: 'this skill lives in a read-only root: ' + known.rootLabel }, 400)
+          }
           const out = setSkillMode(dir, mode, { expectName: name })
           json(res, { ok: true, ...out, needsRestart: false, skills: listSkills({ cwd: process.cwd() }).skills })
         } catch (e) {
@@ -2816,6 +2821,14 @@ export function apply(ctx) {
           if (!srcDir || !allowed.some((r) => r.path === rootDir)) {
             return json(res, { ok: false, code: 'DSM_SKILL_BAD_INPUT', error: 'body: { srcDir: string, root: <scanned root> }' }, 400)
           }
+          // srcDir 不加约束就等于「把任意本地目录复制进 skill 根」的原语：
+          // 只允许从已扫描的 skill 根里搬（含项目根），拒绝系统目录与临时路径。
+          const roots = skillRoots({ cwd: process.cwd() })
+          const srcAbs = resolvePath(srcDir)
+          const inside = roots.some((r) => srcAbs === r.path || srcAbs.startsWith(r.path + pathSep))
+          if (!inside) {
+            return json(res, { ok: false, code: 'DSM_SKILL_BAD_SRC', error: 'srcDir must live inside a known skill root' }, 400)
+          }
           const out = importSkillDir(srcDir, rootDir, { overwrite })
           json(res, { ok: true, name: out.name, dir: out.dir, skill: out.skill, needsRestart: false, skills: listSkills({ cwd: process.cwd() }).skills })
         } catch (e) {
@@ -2835,7 +2848,12 @@ export function apply(ctx) {
           const name = body && typeof body.name === 'string' ? body.name : ''
           const known = dir ? listSkills({ cwd: process.cwd() }).skills.find((s) => s.dir === dir) : null
           if (!known) return json(res, { ok: false, code: 'DSM_SKILL_UNKNOWN', error: 'not a scanned skill directory' }, 400)
-          if (name && known.name !== name) return json(res, { ok: false, code: 'DSM_SKILL_MISMATCH', error: 'name mismatch' }, 400)
+          if (known.writable === false) {
+            return json(res, { ok: false, code: 'DSM_SKILL_READONLY', error: 'this skill lives in a read-only root: ' + known.rootLabel }, 400)
+          }
+          // name 必填：删除不可恢复，调用方必须点名要删哪个 skill。
+          if (!name) return json(res, { ok: false, code: 'DSM_SKILL_BAD_INPUT', error: 'body: { dir: string, name: string }' }, 400)
+          if (known.name !== name) return json(res, { ok: false, code: 'DSM_SKILL_MISMATCH', error: 'name mismatch' }, 400)
           const out = deleteSkillDir(dir)
           json(res, { ok: true, ...out, needsRestart: false, skills: listSkills({ cwd: process.cwd() }).skills })
         } catch (e) {

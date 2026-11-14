@@ -46,7 +46,7 @@ function findEocd(buf) {
  * 读 zip。返回 [{ name, data: Buffer, dir: boolean }]，顺序同中央目录。
  * 目录条目（名字以 / 结尾）保留但 data 为空。
  */
-export function readZip(buf) {
+export function readZip(buf, { maxTotalBytes = 0 } = {}) {
   if (!Buffer.isBuffer(buf)) throw new Error('readZip expects a Buffer')
   const eocd = findEocd(buf)
   if (eocd < 0) throw new Error('not a zip: end of central directory not found')
@@ -55,6 +55,7 @@ export function readZip(buf) {
   if (cenOffset === U32_MAX) throw new Error('zip64 archives are not supported')
 
   const out = []
+  let inflated = 0
   let p = cenOffset
   for (let i = 0; i < total; i++) {
     if (p + CEN_SIZE > buf.length || buf.readUInt32LE(p) !== CEN_SIG) {
@@ -85,10 +86,21 @@ export function readZip(buf) {
     const lNameLen = buf.readUInt16LE(localOffset + 26)
     const lExtraLen = buf.readUInt16LE(localOffset + 28)
     const dataStart = localOffset + LOC_SIZE + lNameLen + lExtraLen
+    // 解压前先按中央目录声明的原始大小预判：压缩比极高的条目（32MB 的 zip
+    // 能膨胀到几十 GB）如果等到 inflate 之后再判体积就晚了——那次分配已经发生。
+    if (maxTotalBytes && uncompSize > maxTotalBytes) {
+      throw new Error(`entry ${name} declares ${uncompSize} bytes, over the ${maxTotalBytes} byte limit`)
+    }
+    if (maxTotalBytes) {
+      inflated += uncompSize
+      if (inflated > maxTotalBytes) throw new Error(`archive inflates past the ${maxTotalBytes} byte limit`)
+    }
     const raw = buf.subarray(dataStart, dataStart + compSize)
     let data
     if (method === 0) data = Buffer.from(raw)
-    else if (method === 8) data = inflateRawSync(raw)
+    // maxOutputLength 是真正的兜底：中央目录里的 uncompSize 是攻击者可写的，
+    // 声明 100 字节、实际解出 4 GB 的条目只有这一层能拦住。
+    else if (method === 8) data = maxTotalBytes ? inflateRawSync(raw, { maxOutputLength: maxTotalBytes }) : inflateRawSync(raw)
     else throw new Error(`unsupported compression method ${method} for ${name}`)
     if (uncompSize !== 0 && data.length !== uncompSize) {
       throw new Error(`size mismatch for ${name}: ${data.length} != ${uncompSize}`)

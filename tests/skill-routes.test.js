@@ -17,7 +17,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 const SKILL_MD = ['---', 'name: demo-skill', 'description: 路由测试用的 skill', '---', '', '# 正文', ''].join('\n')
 
-async function boot() {
+async function boot({ auth = 'owner' } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'dsm-skill-routes-'))
   const home = join(root, 'home')
   const dshHome = join(root, 'dsh-home')
@@ -44,7 +44,10 @@ async function boot() {
     sessionQuery: { readTitleSnapshots: async (ids) => ids.map((id) => ({ status: 'fulfilled', value: { session: { id: String(id), cwd: root, createdAt: 1 }, title: { title: String(id) } } })) },
     storageDomain: { get: () => ({ global: { get: () => domainState, set: async (v) => { domainState.archivedSessionIds = (v && v.archivedSessionIds) || [] } } }) },
     webServer: { register: (route) => { routes.set(route.path, route.handler); return () => {} } },
-    connection: { admit: () => ({ peer: { principal: { kind: 'owner' } } }) },
+    // auth: 'owner' 放行；'guest' 非 owner；'none' 无认证服务（fail-closed 503）
+    connection: auth === 'none'
+      ? undefined
+      : { admit: () => (auth === 'guest' ? { peer: { principal: { kind: 'guest' } } } : { peer: { principal: { kind: 'owner' } } }) },
     get: () => null,
     effect: (fn) => fn(),
   }
@@ -189,6 +192,10 @@ test('skills routes: 导出 zip 再导入到另一个根', async () => {
     assert.equal(ok.body.ok, true)
     assert.equal(ok.body.name, 'demo-skill')
     assert.equal(readFileSync(join(b.skillsDir, 'demo-skill', 'SKILL.md'), 'utf8'), SKILL_MD)
+    // 覆盖不能把旧目录直接抹掉：留一份 <name>.replaced-<stamp> 给用户回滚
+    const kept = readdirSync(b.skillsDir).filter((n) => n.startsWith('demo-skill.replaced-'))
+    assert.equal(kept.length, 1, '覆盖后应保留一份旧目录')
+    assert.equal(readFileSync(join(b.skillsDir, kept[0], 'SKILL.md'), 'utf8'), SKILL_MD)
   } finally {
     await cleanup(b)
   }
@@ -208,25 +215,60 @@ test('skills routes: 删除 + 未知目录', async () => {
     r = await b.call('/archived-sessions/skills/delete', { dir: b.skillDir })
     assert.equal(r.status, 400)
     assert.equal(r.body.code, 'DSM_SKILL_UNKNOWN')
+
+    // name 必填（删除不可恢复，调用方必须点名）
+    const dir2 = join(b.skillsDir, 'another-skill')
+    mkdirSync(dir2, { recursive: true })
+    writeFileSync(join(dir2, 'SKILL.md'), SKILL_MD.replace('demo-skill', 'another-skill'), 'utf8')
+    r = await b.call('/archived-sessions/skills/delete', { dir: dir2 })
+    assert.equal(r.status, 400)
+    assert.equal(r.body.code, 'DSM_SKILL_BAD_INPUT')
+    assert.equal(existsSync(dir2), true, '缺 name 时不能删')
+
+    // import-dir 只接受扫描根内的 srcDir（否则等于任意本地目录复制原语）
+    const outside = join(b.root, 'outside-src')
+    mkdirSync(outside, { recursive: true })
+    writeFileSync(join(outside, 'SKILL.md'), SKILL_MD.replace('demo-skill', 'outside-skill'), 'utf8')
+    r = await b.call('/archived-sessions/skills/import-dir', { srcDir: outside, root: b.skillsDir })
+    assert.equal(r.status, 400)
+    assert.equal(r.body.code, 'DSM_SKILL_BAD_SRC')
   } finally {
     await cleanup(b)
   }
 })
 
-test('skills routes: 三条新路由都已注册且受认证门保护', async () => {
-  const b = await boot()
+test('skills routes: 六条路由都已注册，且非 owner / 无认证服务一律拒绝', async () => {
+  const PATHS = [
+    '/archived-sessions/skills/list',
+    '/archived-sessions/skills/mode',
+    '/archived-sessions/skills/export',
+    '/archived-sessions/skills/import',
+    '/archived-sessions/skills/import-dir',
+    '/archived-sessions/skills/delete',
+  ]
+  const owner = await boot()
   try {
-    for (const p of [
-      '/archived-sessions/skills/list',
-      '/archived-sessions/skills/mode',
-      '/archived-sessions/skills/export',
-      '/archived-sessions/skills/import',
-      '/archived-sessions/skills/import-dir',
-      '/archived-sessions/skills/delete',
-    ]) {
-      assert.ok(b.routes.has(p), `missing route ${p}`)
-    }
+    for (const p of PATHS) assert.ok(owner.routes.has(p), `missing route ${p}`)
   } finally {
-    await cleanup(b)
+    await cleanup(owner)
+  }
+
+  // 光断言"注册了"是不够的：handler 从没被调用过，认证门形同虚设也能过。
+  // 这里真的发请求，确认门在路由前面短路。
+  for (const auth of ['guest', 'none']) {
+    const b = await boot({ auth })
+    try {
+      for (const p of PATHS) {
+        const r = await b.callRaw(p + (p.endsWith('/list') || p.endsWith('/export') ? '' : ''), Buffer.from('{}'))
+        const want = auth === 'none' ? 503 : 403
+        assert.equal(r.status, want, `${auth} 访问 ${p} 应被拒（期望 ${want}，实际 ${r.status}）`)
+        assert.equal(r.body && r.body.ok, false)
+      }
+      // 认证失败时不能产生任何副作用
+      assert.equal(existsSync(join(b.skillDir, 'SKILL.md')), true)
+      assert.equal(readFileSync(join(b.skillDir, 'SKILL.md'), 'utf8'), SKILL_MD)
+    } finally {
+      await cleanup(b)
+    }
   }
 })

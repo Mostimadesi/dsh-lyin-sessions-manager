@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
+import { crc32 } from '../src/zip-lite.js'
 import {
   SKIP_COPY_NAMES as SKIP_COPY_NAMES,
+  deleteSkillDir,
+  importSkillZip,
   listBrokenDirs,
   listSkills,
   modeOf,
@@ -16,6 +19,55 @@ import {
 } from '../src/skill-rows.js'
 
 const SKILL_OK = ['---', 'name: demo-skill', 'description: 一个演示用的 skill', '---', '', '# 正文', '内容一行', ''].join('\n')
+
+// 手写一个 store（method 0，不压缩）的 zip：writeZip 会拒绝不安全名，
+// 所以测读侧守卫只能自己拼字节。
+function makeZipWithName(name, content) {
+  return makeZip([[name, content]])
+}
+
+function makeZip(pairs) {
+  const locals = []
+  const centrals = []
+  let offset = 0
+  for (const [name, content] of pairs) {
+    const nameBuf = Buffer.from(name, 'utf8')
+    const data = Buffer.from(content, 'utf8')
+    const crc = crc32(data)
+    const local = Buffer.alloc(30)
+    local.writeUInt32LE(0x04034b50, 0)
+    local.writeUInt16LE(20, 4)
+    local.writeUInt16LE(0x0800, 6)
+    local.writeUInt32LE(crc, 14)
+    local.writeUInt32LE(data.length, 18)
+    local.writeUInt32LE(data.length, 22)
+    local.writeUInt16LE(nameBuf.length, 26)
+    const cen = Buffer.alloc(46)
+    cen.writeUInt32LE(0x02014b50, 0)
+    cen.writeUInt16LE(20, 4)
+    cen.writeUInt16LE(20, 6)
+    cen.writeUInt16LE(0x0800, 8)
+    cen.writeUInt32LE(crc, 16)
+    cen.writeUInt32LE(data.length, 20)
+    cen.writeUInt32LE(data.length, 24)
+    cen.writeUInt16LE(nameBuf.length, 28)
+    cen.writeUInt32LE(offset, 42)
+    const chunk = Buffer.concat([local, nameBuf, data])
+    locals.push(chunk)
+    centrals.push(Buffer.concat([cen, nameBuf]))
+    offset += chunk.length
+  }
+  const body = Buffer.concat(locals)
+  const central = Buffer.concat(centrals)
+  const eocd = Buffer.alloc(22)
+  eocd.writeUInt32LE(0x06054b50, 0)
+  eocd.writeUInt16LE(pairs.length, 8)
+  eocd.writeUInt16LE(pairs.length, 10)
+  eocd.writeUInt32LE(central.length, 12)
+  eocd.writeUInt32LE(body.length, 16)
+  return Buffer.concat([body, central, eocd])
+}
+
 
 function skillText(name) {
   return ['---', 'name: ' + name, 'description: 演示 ' + name, '---', '', '# 正文', '内容一行', ''].join('\n')
@@ -140,14 +192,17 @@ test('setSkillMode 写盘 + 备份 + 幂等（no-op 不写不备份）', () => {
   const { base, root } = tmpRoot()
   const dir = writeSkill(root, 'demo-skill')
   const file = join(dir, 'SKILL.md')
+  // 测试根是 <base>/.dsh/skills，只有把 base 当 projectRoot 才会被认成可写根
+  // （生产里这正是「项目 .dsh/skills」那条根）。
+  const opts = { projectRoot: base }
 
-  const first = setSkillMode(dir, 'off', { expectName: 'demo-skill' })
+  const first = setSkillMode(dir, 'off', { ...opts, expectName: 'demo-skill' })
   assert.equal(first.changed, true)
   assert.equal(first.mode, 'off')
   assert.ok(first.backup && first.backup.includes('.bak-skill-'))
   assert.match(readFileSync(file, 'utf8'), /user-invocable: false/)
 
-  const second = setSkillMode(dir, 'off', { expectName: 'demo-skill' })
+  const second = setSkillMode(dir, 'off', { ...opts, expectName: 'demo-skill' })
   assert.equal(second.changed, false)
   assert.equal(second.backup, null)
 
@@ -155,7 +210,7 @@ test('setSkillMode 写盘 + 备份 + 幂等（no-op 不写不备份）', () => {
   assert.equal(backups.length, 1, 'no-op 不应新增备份')
   assert.equal(readFileSync(join(dir, backups[0]), 'utf8'), SKILL_OK, '备份是改动前的原文')
 
-  const back = setSkillMode(dir, 'on', { expectName: 'demo-skill' })
+  const back = setSkillMode(dir, 'on', { ...opts, expectName: 'demo-skill' })
   assert.equal(back.changed, true)
   assert.equal(readFileSync(file, 'utf8'), SKILL_OK)
 })
@@ -163,8 +218,9 @@ test('setSkillMode 写盘 + 备份 + 幂等（no-op 不写不备份）', () => {
 test('setSkillMode 连续两次同一秒不撞备份名', () => {
   const { base, root } = tmpRoot()
   const dir = writeSkill(root, 'demo-skill')
-  setSkillMode(dir, 'clipboard')
-  setSkillMode(dir, 'off')
+  const opts = { projectRoot: base }
+  setSkillMode(dir, 'clipboard', opts)
+  setSkillMode(dir, 'off', opts)
   const backups = readdirSync(dir).filter((f) => f.includes('.bak-skill-'))
   assert.equal(backups.length, 2, '两次改动应产生两个互不覆盖的备份')
 })
@@ -172,8 +228,86 @@ test('setSkillMode 连续两次同一秒不撞备份名', () => {
 test('setSkillMode 拒绝 name 不匹配与非 skill 目录', () => {
   const { base, root } = tmpRoot()
   const dir = writeSkill(root, 'demo-skill')
-  assert.throws(() => setSkillMode(dir, 'off', { expectName: 'other-skill' }), /skill name mismatch/)
+  const opts = { projectRoot: base }
+  assert.throws(() => setSkillMode(dir, 'off', { ...opts, expectName: 'other-skill' }), /skill name mismatch/)
   const empty = join(root, 'empty-dir')
   mkdirSync(empty, { recursive: true })
-  assert.throws(() => setSkillMode(empty, 'off'), /SKILL.md not found/)
+  assert.throws(() => setSkillMode(empty, 'off', opts), /SKILL.md not found/)
+  // 不在任何扫描根下的目录一律拒绝（否则一条 owner 请求就能改宿主包里的官方 skill）。
+  const outside = mkdtempSync(join(tmpdir(), 'dsm-outside-'))
+  const loose = join(outside, 'loose-skill')
+  mkdirSync(loose, { recursive: true })
+  writeFileSync(join(loose, 'SKILL.md'), SKILL_OK, 'utf8')
+  assert.throws(() => setSkillMode(loose, 'off', opts), /outside every known skill root/)
+  assert.throws(() => deleteSkillDir(loose, opts), /outside every known skill root/)
+})
+
+test('bundled 根里的 skill 只读：拒绝开关与删除，文件原样保留', () => {
+  const { base } = tmpRoot()
+  const bundled = mkdtempSync(join(tmpdir(), 'dsm-bundled-'))
+  const dir = writeSkill(bundled, 'official-skill')
+  const opts = { projectRoot: base, env: { ...process.env, DSH_BUNDLED_SKILL_DIR: bundled } }
+  assert.throws(() => setSkillMode(dir, 'off', opts), /bundled skills are read-only/)
+  assert.throws(() => deleteSkillDir(dir, opts), /bundled skills are read-only/)
+  assert.equal(existsSync(join(dir, 'SKILL.md')), true, '被拒绝时文件必须原样还在')
+})
+
+// ── review 反馈回归（setMode 的读写一致性）──────────────────────────
+const FM = (lines, body = ['', '# 正文', '']) => ['---', ...lines, '---', ...body].join('\n')
+
+test('setMode 是幂等的：已是目标态就不改字节（on 的不动点）', () => {
+  // 只写了 user-invocable: false —— 语义上仍是 on，早期实现会把这一行删掉，
+  // 等于用户点"启用"反而偷偷开了 / 调用。
+  const text = FM(['name: a', 'description: b', 'user-invocable: false'])
+  assert.equal(modeOf(splitSkillFile(text).frontmatter), 'on')
+  assert.equal(setMode(text, 'on'), text)
+
+  const off = FM(['name: a', 'description: b', 'disable-model-invocation: true', 'user-invocable: false'])
+  assert.equal(modeOf(splitSkillFile(off).frontmatter), 'off')
+  assert.equal(setMode(off, 'off'), off)
+
+  const clip = FM(['name: a', 'description: b', 'disable-model-invocation: true'])
+  assert.equal(modeOf(splitSkillFile(clip).frontmatter), 'clipboard')
+  assert.equal(setMode(clip, 'clipboard'), clip)
+})
+
+test('setMode 把重复键收敛成一行（读第一个、写全部会自相矛盾）', () => {
+  const text = FM(['name: a', 'description: b', 'disable-model-invocation: false', 'disable-model-invocation: false'])
+  const out = setMode(text, 'clipboard')
+  const hits = out.split('\n').filter((l) => l.startsWith('disable-model-invocation:'))
+  assert.equal(hits.length, 1, '重复键必须收敛成一条')
+  assert.equal(hits[0], 'disable-model-invocation: true')
+  // 收敛之后读出来的就是真值，不会出现「写 true 却读到 false」
+  assert.equal(modeOf(splitSkillFile(out).frontmatter), 'clipboard')
+})
+
+test('setMode 认得行尾注释（否则停用的 skill 会被"启用"按钮复活）', () => {
+  const text = FM(['name: a', 'description: b', 'disable-model-invocation: true # 临时停用'])
+  assert.equal(modeOf(splitSkillFile(text).frontmatter), 'clipboard', '注释不该让布尔解析失败')
+  assert.equal(setMode(text, 'clipboard'), text, '已命中目标态就不动它，注释也不丢')
+  const off = setMode(text, 'off')
+  assert.match(off, /user-invocable: false/)
+  assert.match(off, /disable-model-invocation: true/)
+})
+
+test('setMode 沿用原文件的 CRLF 换行', () => {
+  const text = FM(['name: a', 'description: b']).replace(/\n/g, '\r\n')
+  const out = setMode(text, 'off')
+  assert.equal(/[^\r]\n/.test(out), false, 'CRLF 文件里不许出现裸 LF')
+  assert.match(out, /disable-model-invocation: true\r\n/)
+  assert.match(out, /user-invocable: false\r\n/)
+  // 回到 on 应该逐字节还原
+  assert.equal(setMode(out, 'on'), text)
+})
+
+test('safeJoin 挡住 zip 相对路径穿越（isSafeRel 是第一道防线）', () => {
+  // 经 importSkillZip 走真实路径：手工造一个带 .. 的 zip（writeZip 会拒绝，
+  // 所以这里直接拼字节，确保测的是读侧守卫而不是写出侧）。
+  // 前缀合法（demo/）但另一条目用 .. 想跳出 staging 目录。
+  const evil = makeZip([['demo/SKILL.md', SKILL_OK], ['demo/../../escape.txt', 'pwn']])
+  const base = mkdtempSync(join(tmpdir(), 'dsm-slip-'))
+  const root = join(base, '.dsh', 'skills')
+  mkdirSync(root, { recursive: true })
+  assert.throws(() => importSkillZip(evil, root), /unsafe archive entry|has no SKILL\.md/)
+  assert.equal(existsSync(join(base, 'escape')), false, '没有文件被写到根外')
 })

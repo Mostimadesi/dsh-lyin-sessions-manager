@@ -2909,15 +2909,29 @@ function SessionPanel({ workspacesSvc }) {
                           className="archv-btn skill-act"
                           disabled={skillBusy}
                           title="导出为 zip"
-                          onClick={() => {
-                            const url = `/archived-sessions/skills/export?dir=${encodeURIComponent(s.dir)}`
-                            const a = document.createElement('a')
-                            a.href = url
-                            a.download = `${s.dirName || s.name}.zip`
-                            document.body.appendChild(a)
-                            a.click()
-                            a.remove()
-                            setSkillNote(`已开始导出 ${s.name}.zip`)
+                          onClick={async () => {
+                            setSkillErr('')
+                            try {
+                              const res = await fetch(`/archived-sessions/skills/export?dir=${encodeURIComponent(s.dir)}`)
+                              const type = res.headers.get('content-type') || ''
+                              if (!res.ok || !type.includes('zip')) {
+                                // 失败时后端回的是 JSON，若走裸 <a download> 会被存成 .zip 且看不出来。
+                                const d = await res.json().catch(() => null)
+                                throw new Error((d && (d.error || d.message)) || `导出失败 (${res.status})`)
+                              }
+                              const blob = await res.blob()
+                              const url = URL.createObjectURL(blob)
+                              const a = document.createElement('a')
+                              a.href = url
+                              a.download = `${s.dirName || s.name}.zip`
+                              document.body.appendChild(a)
+                              a.click()
+                              a.remove()
+                              URL.revokeObjectURL(url)
+                              setSkillNote(`已导出 ${s.name}.zip`)
+                            } catch (e) {
+                              setSkillErr(String((e && e.message) || e))
+                            }
                           }}
                         >导出</button>
                         <button
@@ -2975,7 +2989,12 @@ function SessionPanel({ workspacesSvc }) {
                       setSkillErr('')
                       try {
                         const buf = await file.arrayBuffer()
-                        const res = await fetch(`/archived-sessions/skills/import?root=${encodeURIComponent(skillImportRoot)}&overwrite=1`, {
+                        // 覆盖 = 换掉磁盘上已有的同名 skill。先确认，用户才知道会动到什么。
+                        const overwrite = window.confirm(
+                          '如果已存在同名 skill，是否覆盖？\n\n确定 = 覆盖（旧目录会改名保留为 <name>.replaced-<时间>）\n取消 = 遇到同名就报错，不覆盖',
+                        )
+                        const qs = `root=${encodeURIComponent(skillImportRoot)}` + (overwrite ? '&overwrite=1' : '')
+                        const res = await fetch(`/archived-sessions/skills/import?${qs}`, {
                           method: 'POST',
                           headers: { 'content-type': 'application/zip' },
                           body: buf,
@@ -5780,7 +5799,7 @@ export function apply(ctx) {
   // 同一能力也尝试注册为客户端 cordis 服务 'lyinSessions'（可用则用）。
   try {
     const api = {
-      version: '3.10.1',
+      version: '3.10.2',
       openSession(id) {
         const target = id === null || id === undefined ? '' : String(id)
         if (!target) return false

@@ -118,14 +118,18 @@ test('importSkillDir 复制目录，拒绝自我导入与重名', () => {
 })
 
 test('deleteSkillDir 删目录并给出摘要', () => {
-  const root = tmpDir()
+  // 必须在「可写 skill 根」里：deleteSkillDir 现在会拒绝任何扫描根之外/只读根的目录。
+  const base = tmpDir()
+  const root = join(base, '.dsh', 'skills')
+  mkdirSync(root, { recursive: true })
+  const opts = { projectRoot: base }
   const dir = makeSkill(root, 'demo-skill', { 'references/a.md': 'a' })
-  const out = deleteSkillDir(dir)
+  const out = deleteSkillDir(dir, opts)
   assert.equal(out.name, 'demo-skill')
   assert.equal(out.files, 2)
   assert.match(out.digest, /^[0-9a-f]{12}$/)
   assert.equal(existsSync(dir), false)
-  assert.throws(() => deleteSkillDir(dir), /not a valid skill directory/)
+  assert.throws(() => deleteSkillDir(dir, opts), /not a valid skill directory/)
 })
 
 test('collectSkillFiles 跳过 .git / node_modules 等', () => {
@@ -140,4 +144,48 @@ test('collectSkillFiles 数量上限', () => {
   const dir = makeSkill(root, 'demo-skill')
   for (let i = 0; i < 5; i++) writeFileSync(join(dir, `f${i}.txt`), 'x')
   assert.throws(() => collectSkillFiles(dir, { maxFiles: 3 }), /too many files/)
+})
+
+test('readZip 在解压前就用声明体积挡掉压缩炸弹', () => {
+  // 40 MB 的 0 压成 deflate 只有 ~40 KB，远低于 readBinaryBody 的 32 MiB 上限；
+  // 如果等到 inflate 之后再判体积，那次内存分配已经发生了。
+  const bomb = writeZip([{ name: 'big.txt', data: Buffer.alloc(40 * 1024 * 1024, 0) }])
+  assert.ok(bomb.length < 1024 * 1024, 'fixture 本身应该是小文件')
+  assert.throws(
+    () => readZip(bomb, { maxTotalBytes: 16 * 1024 * 1024 }),
+    /over the 16777216 byte limit|inflates past/,
+  )
+  // 不设上限时照常能读（默认行为不变）
+  assert.equal(readZip(bomb)[0].data.length, 40 * 1024 * 1024)
+})
+
+test('importSkillZip 拒绝同名重复条目（校验的和落盘的必须是同一份）', () => {
+  const root = tmpDir()
+  const skillRoot = join(root, 'skills')
+  mkdirSync(skillRoot, { recursive: true })
+  const good = ['---', 'name: dupe-skill', 'description: 演示 dupe', '---', '', '# 正文', ''].join('\n')
+  const evil = 'pwned, no frontmatter here'
+  const zip = writeZip([
+    { name: 'dupe-skill/SKILL.md', data: Buffer.from(good, 'utf8') },
+    { name: 'dupe-skill/SKILL.md', data: Buffer.from(evil, 'utf8') },
+  ])
+  assert.throws(() => importSkillZip(zip, skillRoot), /duplicate archive entry/)
+  assert.equal(existsSync(join(skillRoot, 'dupe-skill')), false, '被拒绝时不能留下半成品')
+})
+
+test('导出不打包自己的备份与 staging（否则每开关一次就多一份历史）', () => {
+  const root = tmpDir()
+  const dir = makeSkill(root, 'demo-skill', { 'references/a.md': 'a' })
+  // 模拟历史备份与中断留下的 staging
+  writeFileSync(join(dir, 'SKILL.md.bak-skill-20260101-000000.000'), 'old')
+  writeFileSync(join(dir, 'references/a.md.bak-skill-20260101-000001.000'), 'old')
+  mkdirSync(join(dir, '.import-demo-skill-1-2'), { recursive: true })
+  writeFileSync(join(dir, '.import-demo-skill-1-2', 'SKILL.md'), 'staging')
+
+  const names = collectSkillFiles(dir).map((f) => f.name)
+  assert.deepEqual(names.sort(), ['SKILL.md', 'references/a.md'])
+
+  const zip = exportSkillZip(dir, { dirName: 'demo-skill' })
+  const entries = readZip(zip).map((e) => e.name).sort()
+  assert.deepEqual(entries, ['demo-skill/SKILL.md', 'demo-skill/references/a.md'])
 })

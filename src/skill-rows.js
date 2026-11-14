@@ -58,11 +58,32 @@ export function readFrontmatterField(frontmatter, key) {
   for (const line of frontmatter) {
     const m = re.exec(line.replace(/\r$/, ''))
     if (!m) continue
-    let v = m[1].trim()
+    let v = stripInlineComment(m[1]).trim()
     if (v.length >= 2 && (v[0] === '"' || v[0] === "'") && v[v.length - 1] === v[0]) v = v.slice(1, -1)
     return v
   }
   return ''
+}
+
+// YAML 允许行尾注释（`key: true # 说明`）。不剥掉的话布尔解析会失败、
+// 值退回默认，然后 setMode 把这行删掉——被"停用"的 skill 就悄悄复活了。
+function stripInlineComment(value) {
+  const v = String(value == null ? '' : value)
+  let quote = ''
+  for (let i = 0; i < v.length; i++) {
+    const c = v[i]
+    if (quote) {
+      if (c === quote) quote = ''
+      continue
+    }
+    if (c === '"' || c === "'") {
+      if (i === 0 || /\s/.test(v[i - 1])) quote = c
+      continue
+    }
+    // 只有前面是空白时 `#` 才算注释开始（`a#b` 是普通字符）
+    if (c === '#' && (i === 0 || /\s/.test(v[i - 1]))) return v.slice(0, i)
+  }
+  return v
 }
 
 function frontmatterBoolean(frontmatter, key) {
@@ -98,35 +119,47 @@ export function setMode(text, mode) {
   const { lines, frontmatter, closeIndex } = splitSkillFile(text)
   if (!frontmatter) throw new Error('SKILL.md has no YAML frontmatter')
 
+  // 已经是目标态就原样返回：'on' 对「只写了 user-invocable: false」的 frontmatter
+  // 也成立，若继续走重写循环会把这行删掉，等于偷偷改了用户的意图。
+  if (modeOf(frontmatter) === mode) return text
+
   const wantModel = mode === 'clipboard' || mode === 'off'
   const wantUser = mode === 'off'
 
-  const kept = []
-  let hadModel = false
-  let hadUser = false
-  for (const line of frontmatter) {
-    const bare = line.replace(/\r$/, '')
-    if (new RegExp('^' + KEY_MODEL + ':').test(bare)) {
-      hadModel = true
-      if (wantModel) kept.push(`${KEY_MODEL}: true`)
-      continue
-    }
-    if (new RegExp('^' + KEY_USER + ':').test(bare)) {
-      hadUser = true
-      if (wantUser) kept.push(`${KEY_USER}: false`)
-      continue
-    }
-    kept.push(line)
-  }
-  if (wantModel && !hadModel) kept.push(`${KEY_MODEL}: true`)
-  if (wantUser && !hadUser) kept.push(`${KEY_USER}: false`)
+  // 沿用文件自己的换行符：CRLF 文件里只改几行，不能把整份文件变成混合换行。
+  // splitSkillFile 是按 '\n' 切的，所以 CRLF 文件的行尾会留一个 '\r'。
+  const eol = /\r$/.test(lines[0] || '') ? '\r\n' : '\n'
+  const bare = (line) => line.replace(/\r$/, '')
 
-  const head = lines.slice(0, 1)
-  const tail = lines.slice(closeIndex)
-  const next = [...head, ...kept, ...tail]
-  const out = next.join('\n')
-  if (out === text) return text
-  return out
+  const kept = []
+  let wroteModel = false
+  let wroteUser = false
+  for (const line of frontmatter) {
+    const stripped = bare(line)
+    if (new RegExp('^' + KEY_MODEL + ':').test(stripped)) {
+      // 重复键只保留一处规范行，否则读（取第一个）与写（全都改）对不上。
+      if (wantModel && !wroteModel) {
+        kept.push(`${KEY_MODEL}: true`)
+        wroteModel = true
+      }
+      continue
+    }
+    if (new RegExp('^' + KEY_USER + ':').test(stripped)) {
+      if (wantUser && !wroteUser) {
+        kept.push(`${KEY_USER}: false`)
+        wroteUser = true
+      }
+      continue
+    }
+    kept.push(bare(line))
+  }
+  if (wantModel && !wroteModel) kept.push(`${KEY_MODEL}: true`)
+  if (wantUser && !wroteUser) kept.push(`${KEY_USER}: false`)
+
+  const head = lines.slice(0, 1).map(bare)
+  const tail = lines.slice(closeIndex).map(bare)
+  const out = [...head, ...kept, ...tail].join(eol)
+  return out === text ? text : out
 }
 
 // ── 扫描 ──────────────────────────────────────────────────────────────
@@ -269,6 +302,7 @@ export function listBrokenDirs({ cwd = process.cwd(), env = process.env, home = 
 
 // 备份名带毫秒 + 冲突自增：同一秒内连续切两次（自动化/测试）不会撞车。
 let backupSeq = 0
+let tmpSeq = 0
 function backupOf(file) {
   const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 19)
   for (let i = 0; i < 100; i++) {
@@ -284,7 +318,8 @@ function backupOf(file) {
 export function writeSkillFileAtomically(file, text) {
   const backup = backupOf(file)
   writeFileSync(backup, readFileSync(file), { flag: 'wx' })
-  const tmp = `${file}.tmp-${process.pid}-${Date.now()}`
+  tmpSeq += 1
+  const tmp = `${file}.tmp-${process.pid}-${Date.now()}-${tmpSeq}`
   try {
     writeFileSync(tmp, text, 'utf8')
     renameSync(tmp, file)
@@ -298,8 +333,18 @@ export function writeSkillFileAtomically(file, text) {
 }
 
 /** 切换一个 skill 的三态。no-op 时不写盘、不备份。 */
-export function setSkillMode(dir, mode, { expectName = '' } = {}) {
+// 只允许改动「可写根」里的 skill（bundled 目录属于宿主包，改了下一次升级就被覆盖）。
+function assertWritableDir(dir, rootsOpts = {}) {
+  const abs = resolve(dir)
+  const root = skillRoots(rootsOpts).find((r) => abs === r.path || abs.startsWith(r.path + sep))
+  if (!root) throw new Error(`skill directory is outside every known skill root: ${dir}`)
+  if (root.scope === 'bundled') throw new Error(`bundled skills are read-only: ${dir}`)
+  return abs
+}
+
+export function setSkillMode(dir, mode, { expectName = '', cwd = process.cwd(), env = process.env, projectRoot = null } = {}) {
   if (!SKILL_MODE_LABEL[mode]) throw new Error(`unknown skill mode: ${mode}`)
+  assertWritableDir(dir, { cwd, env, projectRoot })
   const file = join(dir, SKILL_FILE)
   if (!existsSync(file)) throw new Error(`SKILL.md not found in ${dir}`)
   const text = readFileSync(file, 'utf8')
@@ -320,13 +365,19 @@ export function setSkillMode(dir, mode, { expectName = '' } = {}) {
 // ── 导入 / 导出 ───────────────────────────────────────────────────────
 
 /** 递归收集一个 skill 目录下的文件（相对路径 → Buffer），带体积与数量上限。 */
+// 我们自己写的备份（SKILL.md.bak-skill-…）与导入 staging 不算 skill 内容：
+// 不排除的话每次导出都会把整段历史备份塞进 zip，导入回来还会多出一堆垃圾。
+function isOurArtifact(name) {
+  return name.includes('.bak-skill-') || name.startsWith('.import-')
+}
+
 export function collectSkillFiles(dir, { maxFiles = MAX_IMPORT_FILES, maxBytes = MAX_UNPACKED_BYTES } = {}) {
   const out = []
   let bytes = 0
   const walk = (abs, rel) => {
     const entries = readdirSync(abs, { withFileTypes: true })
     for (const e of entries) {
-      if (SKIP_COPY_NAMES.has(e.name)) continue
+      if (SKIP_COPY_NAMES.has(e.name) || isOurArtifact(e.name)) continue
       const childAbs = join(abs, e.name)
       const childRel = rel ? `${rel}/${e.name}` : e.name
       if (e.isDirectory()) {
@@ -368,12 +419,19 @@ function safeJoin(base, rel) {
 export function importSkillZip(buf, rootDir, { overwrite = false } = {}) {
   if (!Buffer.isBuffer(buf)) throw new Error('importSkillZip expects a Buffer')
   if (buf.length > MAX_ARCHIVE_BYTES) throw new Error(`archive exceeds ${MAX_ARCHIVE_BYTES} bytes`)
-  const entries = readZip(buf).filter((e) => !e.dir)
+  const entries = readZip(buf, { maxTotalBytes: MAX_UNPACKED_BYTES }).filter((e) => !e.dir)
 
   const skillEntry = entries.find((e) => e.name === SKILL_FILE || e.name.endsWith('/' + SKILL_FILE))
   if (!skillEntry) throw new Error('archive has no SKILL.md')
   const prefix = skillEntry.name.slice(0, skillEntry.name.length - SKILL_FILE.length)
   const scoped = entries.filter((e) => e.name.startsWith(prefix))
+  // 同名条目会「后写覆盖前写」：校验用的是 entries.find 找到的那份，
+  // 落盘时却被同名条目顶掉 —— 等于校验和落地不是同一个文件。
+  const seen = new Set()
+  for (const e of scoped) {
+    if (seen.has(e.name)) throw new Error(`duplicate archive entry: ${e.name}`)
+    seen.add(e.name)
+  }
 
   const text = skillEntry.data.toString('utf8')
   const { frontmatter } = splitSkillFile(text)
@@ -402,7 +460,14 @@ export function importSkillZip(buf, rootDir, { overwrite = false } = {}) {
       mkdirSync(dirname(target), { recursive: true })
       writeFileSync(target, e.data)
     }
-    if (existsSync(dest)) rmSync(dest, { recursive: true, force: true })
+    // 覆盖时把旧目录改名留着，而不是 rmSync：用户丢一个同名 zip 不该
+    // 连带删掉目录里的历史备份与非 skill 文件。
+    if (existsSync(dest)) {
+      const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 19)
+      let retired = `${dest}.replaced-${stamp}`
+      for (let i = 1; existsSync(retired) && i < 100; i++) retired = `${dest}.replaced-${stamp}-${i}`
+      renameSync(dest, retired)
+    }
     mkdirSync(dirname(dest), { recursive: true })
     renameSync(staging, dest)
   } catch (e) {
@@ -457,8 +522,8 @@ export function importSkillDir(srcDir, rootDir, { overwrite = false } = {}) {
 }
 
 /** 删除一个 skill 目录（先做一次内容摘要，返回给调用方展示）。 */
-export function deleteSkillDir(dir) {
-  const abs = resolve(dir)
+export function deleteSkillDir(dir, { cwd = process.cwd(), env = process.env, projectRoot = null } = {}) {
+  const abs = assertWritableDir(dir, { cwd, env, projectRoot })
   const skill = readSkillDir(abs)
   if (!skill) throw new Error('not a valid skill directory')
   const files = collectSkillFiles(abs).map((f) => f.name).sort()
