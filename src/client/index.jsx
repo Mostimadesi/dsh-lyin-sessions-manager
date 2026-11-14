@@ -271,7 +271,7 @@ body[data-ds-dark-theme] .archv{color-scheme:dark}
 .mv-browse-row{display:flex;align-items:center;gap:8px}
 .mv-browse-row input[type=text]{flex:1;min-width:0}
 .mv-foot{display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-top:2px}
-@media (max-width:640px){.archv-row{flex-wrap:wrap}.mv-sheet{padding:12px}}
+@media (max-width:640px){.archv-row{flex-wrap:wrap}.mv-sheet{padding:12px}.maint-right{margin-left:0}}
 .dtl-sheet{margin-top:12px;padding:14px;border:1px solid var(--dsw-alias-border-l2);border-radius:var(--dsm-radius-sheet);background:var(--dsw-alias-fill-subtle)}
 .dtl-sheet-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
 .dtl-sheet-title{font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary);margin:0}
@@ -2678,6 +2678,7 @@ function SessionPanel({ workspacesSvc }) {
 
           {/* 维护栏是面板级工具，与当前查看哪一组会话无关，故所有视图都显示。 */}
           <div className="maint-bar">
+            <div className="maint-group">
               <button type="button" className="archv-btn" aria-expanded={storageOpen} onClick={() => { const next = !storageOpen; setStorageOpen(next); if (next && (!storage || storageDirty.current) && !storageBusy) loadStorage() }}>
                 存储占用{storage ? ` · ${fmtBytes(storage.totalBytes) || '0 B'}` : ''}
               </button>
@@ -2693,10 +2694,14 @@ function SessionPanel({ workspacesSvc }) {
               <button type="button" className={'archv-btn' + (aa.settings.inactiveDays ? ' archv-go' : '')} aria-expanded={aaOpen} onClick={() => setAaOpen(!aaOpen)}>
                 自动归档{aa.settings.inactiveDays ? `：${aa.settings.inactiveDays} 天未活跃` : '：未启用'}
               </button>
+              {aa.lastRunAt ? <span className="maint-note">上次检查 {fmtDate(aa.lastRunAt)}，归档 {aa.lastArchivedCount} 个</span> : <span className="maint-note">尚未检查</span>}
               {/* v0.2.2 快捷面板外观：预设 + 细参数（netease-lyrics 同款模式）。 */}
               <button type="button" className="archv-btn" aria-expanded={qaStyleOpen} title="快捷面板的主题预设与圆角/模糊/不透明度/宽度" onClick={() => setQaStyleOpen(!qaStyleOpen)}>
                 面板外观
               </button>
+            </div>
+            {/* 右侧分组：宿主集成类工具（写 profile / 写 skill 文件），与会话日常维护分开。 */}
+            <div className="maint-group maint-right">
               {/* v0.5.5：MCP 服务器开关（最小实现，直接改 profile 的 cordis.patch.yml）。 */}
               <button
                 type="button"
@@ -2739,7 +2744,7 @@ function SessionPanel({ workspacesSvc }) {
                     .finally(() => setSkillBusy(false))
                 }}
               >Skill 列表{skillData && Array.isArray(skillData.skills) ? ` (${skillData.skills.length})` : ''}</button>
-              {aa.lastRunAt ? <span className="maint-note">上次检查 {fmtDate(aa.lastRunAt)}，归档 {aa.lastArchivedCount} 个</span> : <span className="maint-note">尚未检查</span>}
+            </div>
           </div>
 
           {/* v0.2.2 快捷面板外观 sheet：预设下拉 + 四个滑杆，改动即时生效并
@@ -3928,6 +3933,8 @@ const SIDEBAR_AUG_CSS = `
 .dsm-storage-size{font-size:12px;color:var(--dsw-alias-label-secondary);flex:none;white-space:nowrap}
 .dsm-storage-count{font-size:11px;color:var(--dsw-alias-label-tertiary);flex:none;white-space:nowrap;max-width:32%;overflow:hidden;text-overflow:ellipsis}
 .maint-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 8px}
+.maint-group{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0}
+.maint-right{margin-left:auto}
 .maint-note{font-size:11px;color:var(--dsw-alias-label-tertiary)}
 .mv-sheet-actions{display:flex;align-items:center;gap:6px}
 .aa-check{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--dsw-alias-label-secondary);cursor:pointer}
@@ -5771,7 +5778,7 @@ export function apply(ctx) {
   // 同一能力也尝试注册为客户端 cordis 服务 'lyinSessions'（可用则用）。
   try {
     const api = {
-      version: '3.10.0',
+      version: '3.10.1',
       openSession(id) {
         const target = id === null || id === undefined ? '' : String(id)
         if (!target) return false
