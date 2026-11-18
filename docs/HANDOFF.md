@@ -278,7 +278,7 @@ git stash push -u -q && npm test ; git stash pop   # 在 pristine 状态跑一�
 ### 7.3 最近一次全绿记录
 
 - build stamp `3.12.0+ac22b075`（v3.12.0 工作区归档 + `check:schema`，含 `3084ab3` 的路由修复）
-- **520 项 / 515 通过 / 5 失败**（失败集仍是那 5 项 Windows 基线，按测试名对照，见 §7.2）——**无新增回归**
+- **520 项 / 515–517 通过 / 3–5 失败**（实测 2 次：3 失败与 5 失败各一次；失败集都落在 §7.2 那 5 项 Windows 基线里，按测试名对照）——**无新增回归**
 - 路由级新增 `tests/workspace-archive-routes.test.js` 3 项（提交 `3084ab3`）：空读→归档→幂等→恢复→清空、工作区列表带 `archived` 标记、损坏索引自愈。修掉两个真 bug：`changed` 曾把 store 的异构返回值（记录/布尔/计数）直接透给前端；`createWorkspaceArchiveStore` 曾不认 `DSH_SESSIONS_MANAGER_STAR_DIR`，导致测试写进用户真实状态目录。
 - 上一版记录：build stamp `3.11.0+6806b74d`（v3.11.0 debug.log 轮转 + 已标记拆三行 + 工作区筛选哨兵），**488 项 / 484 通过 / 4 失败**
 - 再上一版：build stamp `3.10.3+5fc28754`（v0.6.3 全量自审），**468 项 / 463–464 通过 / 4–5 基线失败**
