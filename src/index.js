@@ -3164,7 +3164,13 @@ export function apply(ctx) {
         try {
           const body = (req.method === 'POST' ? await readJsonBody(req) : null) || {}
           const action = typeof body.action === 'string' ? body.action : ''
-          let result = null
+          // `changed` must be a boolean on the wire, not whatever the store
+          // happens to return (the ported store returns the record for archive,
+          // a boolean for unarchive and a count for clear). Compare the archive
+          // size before and after instead, so a repeated archive reports "no
+          // change" and the client can skip the toast.
+          const beforeSize = Object.keys((await workspaceArchive.read()).archives).length
+          let removed = 0
           if (action === 'archive') {
             const rawPath = typeof body.path === 'string' ? body.path : ''
             // Only paths DSH actually lists may be archived: accepting a
@@ -3175,23 +3181,25 @@ export function apply(ctx) {
               json(res, { ok: false, error: '未找到该工作区' }, 404)
               return
             }
-            result = await workspaceArchive.archive(known.path, { title: known.title })
+            await workspaceArchive.archive(known.path, { title: known.title })
           } else if (action === 'unarchive') {
-            result = await workspaceArchive.unarchive(typeof body.path === 'string' ? body.path : '')
+            await workspaceArchive.unarchive(typeof body.path === 'string' ? body.path : '')
           } else if (action === 'clear') {
-            result = await workspaceArchive.clear()
+            removed = await workspaceArchive.clear()
           } else if (action) {
             json(res, { ok: false, error: '未知操作' }, 400)
             return
           }
           const store = await workspaceArchive.read()
+          const keys = archivedWorkspaceKeys(store)
           json(res, {
             ok: true,
             action: action || 'list',
-            changed: result,
+            changed: keys.length !== beforeSize,
+            removed,
             schemaVersion: WORKSPACE_ARCHIVE_SCHEMA_VERSION,
             items: Object.values(store.archives).sort((a, b) => b.archivedAt - a.archivedAt),
-            keys: archivedWorkspaceKeys(store),
+            keys,
           })
         } catch (e) {
           json(res, { ok: false, error: String((e && e.message) || e) }, errorStatus(e))

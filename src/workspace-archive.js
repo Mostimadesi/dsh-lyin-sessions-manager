@@ -32,7 +32,11 @@ const DEFAULT_DIR = join(homedir(), '.dsh', 'sessions-manager')
  * @param {string} [options.indexPath] - Full index path, overriding `dir`.
  */
 export function createWorkspaceArchiveStore(options = {}) {
-  const dir = options.dir || process.env.DSH_SESSIONS_MANAGER_WORKSPACE_ARCHIVE_DIR || DEFAULT_DIR
+  // 目录优先级与仓库里其它 store 一致：显式参数 > 本 store 专属 env >
+  // 共享状态目录 env（`DSH_SESSIONS_MANAGER_STAR_DIR`，测试用它把整批 store
+  // 重定向到临时目录）> 真实的 `~/.dsh/sessions-manager`。
+  // 少了第三级，测试会把索引写进用户真实的状态目录。
+  const dir = options.dir || process.env.DSH_SESSIONS_MANAGER_WORKSPACE_ARCHIVE_DIR || process.env.DSH_SESSIONS_MANAGER_STAR_DIR || DEFAULT_DIR
   const indexPath = options.indexPath || join(dir, `workspace-archives.v${WORKSPACE_ARCHIVE_SCHEMA_VERSION}.json`)
   let mutation = Promise.resolve()
 
