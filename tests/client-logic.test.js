@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { aliveSessionCount, applyTagFilter, ascBranchTime, authoritativeTitleForFirstPaint, branchTimeKey, canDropOnWorkspace, collapsedVisibleTotal, countRenderedVisible, dotStateFor, dragAutoScrollStep, effectiveTitleOf, filterShapeFromSaved, filterSnapshotOf, foldBranches, foldOrphanSubagents, foldSubagents, moveNoticeText, noticeToastPlan, openSubagentToast, overflowPlan, pathTail, remainingRows, sessionForNodes, shortId, starredOf, tagDeleteConfirm, titleBackfillDecision, TOAST_MAX_MS, TOAST_MIN_MS, toastDurationFor, workspaceForNodes } from '../src/client/logic.js'
+import { aliveSessionCount, isWorkspaceSentinel, matchWorkspaceFilter, shouldHideEmptyGroup, WS_GONE, WS_SENTINELS, WS_UNGROUPED, applyTagFilter, ascBranchTime, authoritativeTitleForFirstPaint, branchTimeKey, canDropOnWorkspace, collapsedVisibleTotal, countRenderedVisible, dotStateFor, dragAutoScrollStep, effectiveTitleOf, filterShapeFromSaved, filterSnapshotOf, foldBranches, foldOrphanSubagents, foldSubagents, moveNoticeText, noticeToastPlan, openSubagentToast, overflowPlan, pathTail, remainingRows, sessionForNodes, shortId, starredOf, tagDeleteConfirm, titleBackfillDecision, TOAST_MAX_MS, TOAST_MIN_MS, toastDurationFor, workspaceForNodes } from '../src/client/logic.js'
 
 // ---- dotStateFor：状态点语义 ----------------------------------------------
 // 历史回归：DSH 把 running 报成 ongoing（9766476）；done 在当前行上不能亮绿
@@ -823,6 +823,60 @@ test('alive count reports unknown instead of empty for missing or empty data', (
   assert.equal(aliveSessionCount('nope', new Set()), null)
   // 没有一条带 id（结构不认识）→ 同样是「不知道」，不是「组空」。
   assert.equal(aliveSessionCount([{ id: null }, { nope: 1 }], new Set()), null)
+})
+
+// ---- shouldHideEmptyGroup：当前会话在组内时绝不藏（上游 PR #20）-------------
+test('shouldHideEmptyGroup never hides the group holding the current session', () => {
+  // 上游只为当前会话渲染一条 blank 行，插件又把 blank 行藏起来 → 存活数算出来是 0；
+  // 照旧按存活数判空会把用户正在用的工作区连标题一起藏掉。
+  assert.equal(shouldHideEmptyGroup(0, true), false)
+  assert.equal(shouldHideEmptyGroup(0, false), true)
+  assert.equal(shouldHideEmptyGroup(2, false), false)
+  // 不知道（拿不到数据层）→ 保持显示。
+  assert.equal(shouldHideEmptyGroup(null, false), false)
+  assert.equal(shouldHideEmptyGroup(undefined, false), false)
+  // 形状脏一点也不能藏。
+  assert.equal(shouldHideEmptyGroup('nope', false), false)
+  assert.equal(shouldHideEmptyGroup(0, 'yes'), true, '只有严格 true 才算含当前会话')
+})
+
+// ---- 工作区筛选哨兵（上游 cefd98f / issue #29）----------------------------
+test('workspace sentinels are stable and never collide with a real path', () => {
+  assert.equal(WS_UNGROUPED, '__ungrouped__')
+  assert.equal(WS_GONE, '__workspace_gone__')
+  assert.deepEqual([...WS_SENTINELS], [WS_UNGROUPED, WS_GONE])
+  assert.equal(isWorkspaceSentinel(WS_UNGROUPED), true)
+  assert.equal(isWorkspaceSentinel(WS_GONE), true)
+  assert.equal(isWorkspaceSentinel('D:/code/app'), false)
+  assert.equal(isWorkspaceSentinel(''), false)
+  assert.equal(isWorkspaceSentinel(null), false)
+})
+
+test('matchWorkspaceFilter splits all / ungrouped / gone / real path', () => {
+  const grouped = { workspacePath: 'D:/code/app', hasWorkspace: true, workspaceGone: false }
+  const gone = { workspacePath: 'D:/code/deleted', hasWorkspace: true, workspaceGone: true }
+  const loose = { workspacePath: '', hasWorkspace: false }
+  // all / 脏值一律全通过
+  for (const sel of ['all', '', null, undefined, 0]) {
+    assert.equal(matchWorkspaceFilter(grouped, sel), true)
+    assert.equal(matchWorkspaceFilter(loose, sel), true)
+  }
+  assert.equal(matchWorkspaceFilter(grouped, WS_UNGROUPED), false)
+  assert.equal(matchWorkspaceFilter(gone, WS_UNGROUPED), false)
+  assert.equal(matchWorkspaceFilter(loose, WS_UNGROUPED), true)
+  assert.equal(matchWorkspaceFilter(grouped, WS_GONE), false)
+  assert.equal(matchWorkspaceFilter(gone, WS_GONE), true)
+  assert.equal(matchWorkspaceFilter(loose, WS_GONE), false)
+  assert.equal(matchWorkspaceFilter(grouped, 'D:/code/app'), true)
+  assert.equal(matchWorkspaceFilter(gone, 'D:/code/app'), false)
+  // hasWorkspace 缺失时回落到「有非空 path 即算有工作区」（宿主旧版本不带该字段）
+  assert.equal(matchWorkspaceFilter({ workspacePath: 'D:/x' }, WS_UNGROUPED), false)
+  assert.equal(matchWorkspaceFilter({ workspacePath: 'D:/x' }, 'D:/x'), true)
+  assert.equal(matchWorkspaceFilter({}, WS_UNGROUPED), true)
+  // 脏输入不抛
+  assert.equal(matchWorkspaceFilter(null, 'all'), true)
+  assert.equal(matchWorkspaceFilter(null, WS_UNGROUPED), true)
+  assert.equal(matchWorkspaceFilter('nope', WS_GONE), false)
 })
 
 // ---- foldOrphanSubagents：父会话不在列表的子代理（issue #18 第 1 条）--------

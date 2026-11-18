@@ -687,6 +687,46 @@ export function aliveSessionCount(sessions, hiddenIds) {
   return seen === 0 ? null : alive
 }
 
+// 空分组判定（v0.7.0，吸收上游 3.8.1 / PR #20）：当前会话就在本组时绝不藏。
+//
+// 病根：上游只渲染「当前会话」那一条 blank 行，而插件又把 blank 行一律隐藏，
+// 于是组内可见数算出来是 0；若照旧按 aliveSessionCount 判空，就会把用户正在
+// 用的工作区连标题和「+」一起藏掉——看起来像「工作区连同会话一起消失了」。
+// containsCurrent 来自宿主 deriveGroups(...) 的 group.containsCurrent。
+export function shouldHideEmptyGroup(aliveCount, containsCurrent) {
+  if (containsCurrent === true) return false
+  // aliveCount 为 null = 不知道（数据层没拿到），按非空处理。
+  if (aliveCount == null) return false
+  return Number(aliveCount) === 0
+}
+
+// 工作区筛选的两个哨兵值（v0.7.0，吸收上游 cefd98f / issue #29）。
+// 真实工作区的取值是 workspacePath，这两个永远不会撞上：路径不可能等于
+// '__ungrouped__' / '__workspace_gone__'。
+export const WS_UNGROUPED = '__ungrouped__'
+export const WS_GONE = '__workspace_gone__'
+// 哨兵集合：下拉里的兜底 option（「已删工作区 · X」）必须跳过它们，否则会渲染出
+// 「已删工作区 · ?」这种自相矛盾的条目。
+export const WS_SENTINELS = Object.freeze([WS_UNGROUPED, WS_GONE])
+
+export function isWorkspaceSentinel(value) {
+  return WS_SENTINELS.includes(value)
+}
+
+// 工作区筛选谓词。'all' 全通过；两个哨兵分别收「没有工作区」与「工作区已删」；
+// 其余按 workspacePath 精确匹配。
+// hasWorkspace 缺失时回落到「有非空 path 即算有工作区」——宿主旧版本不带该字段。
+export function matchWorkspaceFilter(item, workspaceFilter = 'all') {
+  const sel = typeof workspaceFilter === 'string' && workspaceFilter ? workspaceFilter : 'all'
+  if (sel === 'all') return true
+  const it = item && typeof item === 'object' ? item : {}
+  const path = typeof it.workspacePath === 'string' ? it.workspacePath : ''
+  const hasPath = typeof it.hasWorkspace === 'boolean' ? it.hasWorkspace : !!path
+  if (sel === WS_UNGROUPED) return !hasPath
+  if (sel === WS_GONE) return hasPath && it.workspaceGone === true
+  return path === sel
+}
+
 // 拖拽自动滚动：光标进入滚动容器上/下感应带时每帧该滚多少（负=向上，正=向下，0=不动）。
 // 纯数学，DOM 侧只负责取 rect 与 scrollTop，测试见 tests/client-logic.test.js。
 // - 感应带 = min(edge, max(minZone, height*0.25))：长列表用固定的 edge，矮容器按比例
@@ -1008,6 +1048,81 @@ export function normalizeCollapsed(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return out
   for (const k of Object.keys(input)) {
     if (typeof k === 'string' && k && input[k]) out[k] = true
+  }
+  return out
+}
+
+// v0.7.0（用户决定）：已标记区拆成三小行——收藏 / 待回看 / 高优先级。
+//
+// 为什么不再合并成一行：三者的语义完全不同（★ = 我主动钉住的；待回看 = 我
+// 打算回看的；P1-P2 = 我认为最要紧的），合并后只有徽标能区分，用户扫一遍
+// 看不出来「这一区到底在提醒我什么」。拆开后每行自带说明，且各自可独立折叠
+// （折叠键 sec:marked:star / :review / :priority）。
+//
+// 去重口径不变：「同一个会话在面板里只出现一次」。一个会话同时命中多类时，
+// 按 markKindOf 的先后（收藏 → 待回看 → 优先级）只归入第一个——收藏是最明确
+// 的人工意图，优先级最低（P1 常常是批量设置的）。整行上的 badges 仍显示全部
+// 命中项，所以拆分不会丢失任何一种标记的信息。
+export const QA_MARKED_KINDS = Object.freeze(['star', 'review', 'priority'])
+
+export const QA_MARKED_KIND_LABEL = Object.freeze({
+  star: '★ 收藏',
+  review: '待回看',
+  priority: '高优先级',
+})
+
+export const QA_MARKED_KIND_HINT = Object.freeze({
+  star: '我打了星号的会话',
+  review: '标了待回看、还没回看的',
+  priority: 'P1-P2 的会话',
+})
+
+// 一条会话归入哪一类。空串 = 不属于「已标记」。
+// 与 markBadges 同口径（P1-P2 才算高优先级，P3 是默认值不算）。
+export function markKindOf(item) {
+  const it = item || {}
+  if (it.starred === true) return 'star'
+  if (it.review === true) return 'review'
+  const p = Number(it.priority)
+  if (Number.isInteger(p) && p >= 1 && p <= QA_MARKED_MAX_PRIORITY) return 'priority'
+  return ''
+}
+
+// markedRows 的三通道版：{ star, review, priority } 各为 { rows, total }，
+// 形状与 markedRows 完全一致（多通道只是分区，不改行结构）。
+// 注意每个通道各自截断到 limit，total 也是各自的**截断前**条数。
+export function markedRowsByKind(items, { now = Date.now(), limit = QA_SECTION_LIMIT, exclude = null } = {}) {
+  const skip = idSetOf(exclude)
+  const cap = Math.max(0, Math.floor(Number(limit)) || 0)
+  const buckets = { star: [], review: [], priority: [] }
+  for (const item of Array.isArray(items) ? items : []) {
+    if (!item || item.sessionId == null) continue
+    const id = String(item.sessionId)
+    if (skip.has(id)) continue
+    const kind = markKindOf(item)
+    if (!kind) continue
+    const p = Number(item.priority)
+    buckets[kind].push({
+      sessionId: id,
+      title: item.title || '',
+      workspaceTitle: item.workspaceTitle || '',
+      updatedAt: Number(item.updatedAt) || 0,
+      subagentCount: Number(item.subagentCount) || 0,
+      badges: markBadges(item),
+      kind,
+      order: Number.isInteger(p) && p >= 1 && p <= 5 ? p : 99,
+    })
+  }
+  const out = {}
+  for (const kind of QA_MARKED_KINDS) {
+    const list = buckets[kind]
+    // 收藏 / 待回看没有数字优先级，order 全是 99，于是实际按 updatedAt 倒序；
+    // 高优先级通道则是 P1 在前、同级按最近更新。
+    list.sort((a, b) => (a.order - b.order) || (b.updatedAt - a.updatedAt))
+    out[kind] = {
+      rows: list.slice(0, cap).map(({ order, ...r }) => ({ ...r, ago: agoLabel(r.updatedAt, now) })),
+      total: list.length,
+    }
   }
   return out
 }

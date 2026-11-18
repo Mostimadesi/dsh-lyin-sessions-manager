@@ -8,7 +8,11 @@ import {
   agoLabel,
   foldActivityItems,
   markBadges,
+  markKindOf,
   markedRows,
+  markedRowsByKind,
+  QA_MARKED_KINDS,
+
   mergeActivityItems,
   normalizeCollapsed,
   QA_RECENT_LIMIT,
@@ -309,4 +313,69 @@ test('收起状态清洗：只认 { key: true }，脏值一律回空对象', () 
   assert.deepEqual(normalizeCollapsed({ '': true }), {}, '空 key 丢掉')
   const out = normalizeCollapsed(JSON.parse('{"done":true}'))
   assert.deepEqual(out, { done: true }, 'localStorage 往返后仍可用')
+})
+
+// —— v0.7.0：已标记拆三小行（用户决定）——————————————————————————
+//
+// 拆分口径：一个会话只归入**一类**（收藏 → 待回看 → 优先级），保证面板里
+// 不出现重复行；行上的 badges 仍带全部命中项，所以信息不丢。
+
+test('markKindOf：收藏 > 待回看 > 优先级，P3 不算', () => {
+  assert.equal(markKindOf({ starred: true }), 'star')
+  assert.equal(markKindOf({ review: true }), 'review')
+  assert.equal(markKindOf({ priority: 1 }), 'priority')
+  assert.equal(markKindOf({ priority: 2 }), 'priority')
+  assert.equal(markKindOf({ priority: 3 }), '', 'P3 是默认值')
+  assert.equal(markKindOf({ starred: true, review: true, priority: 1 }), 'star', '收藏最优先')
+  assert.equal(markKindOf({ review: true, priority: 1 }), 'review')
+  assert.equal(markKindOf({}), '')
+  assert.equal(markKindOf(null), '')
+})
+
+test('markedRowsByKind：三通道互不重复，各自排序与 total', () => {
+  const items = [
+    { sessionId: 'st1', title: 'A', starred: true, updatedAt: NOW - 5 * MIN },
+    { sessionId: 'st2', title: 'B', starred: true, updatedAt: NOW - MIN },
+    { sessionId: 'rv1', title: 'C', review: true, updatedAt: NOW - 2 * MIN },
+    { sessionId: 'p1', title: 'D', priority: 1, updatedAt: NOW - 9 * HOUR },
+    { sessionId: 'p2', title: 'E', priority: 2, updatedAt: NOW - HOUR },
+    { sessionId: 'both', title: 'F', starred: true, review: true, priority: 1, updatedAt: NOW },
+    { sessionId: 'plain', title: 'G', updatedAt: NOW },
+  ]
+  const out = markedRowsByKind(items, { now: NOW })
+  assert.deepEqual(Object.keys(out).sort(), ['priority', 'review', 'star'])
+  // 收藏通道按最近更新倒序（无数字优先级）
+  assert.deepEqual(out.star.rows.map((r) => r.sessionId), ['both', 'st2', 'st1'])
+  assert.deepEqual(out.review.rows.map((r) => r.sessionId), ['rv1'])
+  // 优先级通道 P1 在前
+  assert.deepEqual(out.priority.rows.map((r) => r.sessionId), ['p1', 'p2'])
+  // 三通道合起来 = 去重后的并集，没有任何 id 出现两次
+  const all = QA_MARKED_KINDS.flatMap((k) => out[k].rows.map((r) => r.sessionId))
+  assert.equal(new Set(all).size, all.length)
+  assert.deepEqual(all.slice().sort(), ['both', 'p1', 'p2', 'rv1', 'st1', 'st2'])
+  // both 归入收藏，但徽标仍然三项齐全
+  assert.deepEqual(out.star.rows[0].badges, ['★', '待回看', 'P1'])
+  assert.equal(out.star.rows[0].kind, 'star')
+  assert.equal(out.review.total + out.star.total + out.priority.total, 6)
+})
+
+test('markedRowsByKind：exclude 生效，limit 各自截断且保留 total', () => {
+  const items = []
+  for (let i = 0; i < 9; i += 1) items.push({ sessionId: 's' + i, starred: true, updatedAt: NOW - i * MIN })
+  for (let i = 0; i < 3; i += 1) items.push({ sessionId: 'p' + i, priority: 1, updatedAt: NOW - i * MIN })
+  const out = markedRowsByKind(items, { now: NOW, limit: 2 })
+  assert.equal(out.star.rows.length, 2)
+  assert.equal(out.star.total, 9)
+  assert.equal(out.priority.rows.length, 2)
+  assert.equal(out.priority.total, 3)
+  const excluded = markedRowsByKind(items, { now: NOW, exclude: new Set(['s0', 'p0']) })
+  assert.ok(!excluded.star.rows.some((r) => r.sessionId === 's0'))
+  assert.ok(!excluded.priority.rows.some((r) => r.sessionId === 'p0'))
+})
+
+test('markedRowsByKind：脏输入一律返回三个空通道', () => {
+  for (const out of [markedRowsByKind(null), markedRowsByKind([null, {}, { sessionId: 'x' }])]) {
+    for (const kind of QA_MARKED_KINDS) assert.deepEqual(out[kind], { rows: [], total: 0 })
+  }
+  assert.deepEqual([...QA_MARKED_KINDS], ['star', 'review', 'priority'])
 })

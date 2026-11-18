@@ -11,7 +11,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { aliveSessionCount, applyTagFilter, ascPriority, canDropOnWorkspace, collapsedVisibleTotal, countRenderedVisible, dotStateFor, dragAutoScrollStep, effectiveTitleOf, filterShapeFromSaved, filterSnapshotOf, foldActivityItems, foldBranches, foldOrphanSubagents, foldSubagentRows, foldSubagents, groupQuickAccess, markedRows, mergeActivityItems, normalizeCollapsed, noticeToastPlan, QA_RECENT_WINDOW_MS, recentActiveRows, stateFromSessionStatus, summaryCounts, openSubagentToast, overflowPlan, pathTail, priorityOf, remainingRows, reviewOf, sessionForNodes, shortId, starredOf, tagDeleteConfirm, titleBackfillDecision, toastDurationFor, workspaceForNodes } from './logic.js'
+import { aliveSessionCount, applyTagFilter, ascPriority, canDropOnWorkspace, collapsedVisibleTotal, countRenderedVisible, dotStateFor, dragAutoScrollStep, effectiveTitleOf, filterShapeFromSaved, filterSnapshotOf, foldActivityItems, foldBranches, foldOrphanSubagents, foldSubagentRows, foldSubagents, groupQuickAccess, isWorkspaceSentinel, markedRowsByKind, matchWorkspaceFilter, shouldHideEmptyGroup, WS_GONE, WS_UNGROUPED, mergeActivityItems, normalizeCollapsed, noticeToastPlan, QA_MARKED_KIND_HINT, QA_MARKED_KIND_LABEL, QA_MARKED_KINDS, QA_RECENT_WINDOW_MS, recentActiveRows, stateFromSessionStatus, summaryCounts, openSubagentToast, overflowPlan, pathTail, priorityOf, remainingRows, reviewOf, sessionForNodes, shortId, starredOf, tagDeleteConfirm, titleBackfillDecision, toastDurationFor, workspaceForNodes } from './logic.js'
 
 export const inject = ['slots']
 
@@ -882,11 +882,14 @@ function DsmQuickAccessPanel({ compact = false } = {}) {
   const recentSec = recentActiveRows(metaItems, { now, exclude: view.attentionIds })
   const recentShown = recentSec.rows.filter(matchRow)
   // 已标记区再排除「刚在最近活跃里出现过」的，同一会话依旧只出现一次。
-  const markedSec = markedRows(metaItems, {
+  // v0.7.0（用户决定）：拆成三小行——★收藏 / 待回看 / 高优先级，各自可独立折叠。
+  const markedByKind = markedRowsByKind(metaItems, {
     now,
     exclude: new Set([...view.attentionIds, ...recentSec.rows.map((r) => r.sessionId)]),
   })
-  const markedShown = markedSec.rows.filter(matchRow)
+  const markedShownByKind = {}
+  for (const kind of QA_MARKED_KINDS) markedShownByKind[kind] = markedByKind[kind].rows.filter(matchRow)
+  const markedShown = QA_MARKED_KINDS.flatMap((kind) => markedShownByKind[kind])
   const shownGroups = QA_GROUP_META
     .map(({ key, label, color }) => ({ key, label, color, list: (groups[key] || []).filter(matchRow) }))
     .filter((g) => g.list.length > 0)
@@ -1047,14 +1050,16 @@ function DsmQuickAccessPanel({ compact = false } = {}) {
         recentShown,
         recentSec.total,
       )}
-      {/* v0.5.0 次级区②：标记维度——「我自己标过要看的」（v0.1 元数据层）。 */}
-      {renderSec(
-        'sec:marked',
-        '已标记',
-        '★收藏 · 待回看 · P1-P2',
-        markedShown,
-        markedSec.total,
-      )}
+      {/* v0.5.0 次级区②：标记维度——「我自己标过要看的」（v0.1 元数据层）。
+          v0.7.0（用户决定）：拆成三小行，各带一句说明、可独立折叠。空类不渲染
+          （renderSec 内 shown.length === 0 即返回 null），所以没标记时这一带整段消失。 */}
+      {QA_MARKED_KINDS.map((kind) => renderSec(
+        `sec:marked:${kind}`,
+        QA_MARKED_KIND_LABEL[kind],
+        QA_MARKED_KIND_HINT[kind],
+        markedShownByKind[kind],
+        markedByKind[kind].total,
+      ))}
     </div>
   )
 }
@@ -2035,7 +2040,8 @@ function SessionPanel({ workspacesSvc }) {
     const tagPassed = applyTagFilter(base, tagsReady ? tagFilter : '')
     const needle = query.trim().toLocaleLowerCase()
     const filtered = tagPassed.filter((item) => {
-      if (workspaceFilter !== 'all' && (item.workspacePath || '') !== workspaceFilter) return false
+      // v0.7.0：三态——真实工作区路径 / 「未分组」/ 「工作区已删」，谓词见 logic.matchWorkspaceFilter。
+      if (!matchWorkspaceFilter(item, workspaceFilter)) return false
       if (!needle) return true
       // v3.6.2 #6：占位标题的会话按「有效标题」（列表值 → 侧栏权威回落）匹配，
       // 预热补齐但面板未刷新时也能按关键词搜到。
@@ -3224,9 +3230,14 @@ function SessionPanel({ workspacesSvc }) {
                   <label htmlFor="dsm-workspace-filter">工作区</label>
                   <select id="dsm-workspace-filter" value={workspaceFilter} onChange={(e) => setWorkspaceFilter(e.target.value)}>
                     <option value="all">全部工作区</option>
+                    {/* v0.7.0（吸收上游 cefd98f）：两个哨兵值收「没有工作区的会话」与
+                        「工作区目录已经不在了的会话」——这两类在旧版只能混在「全部」里。 */}
+                    <option value={WS_UNGROUPED}>未分组（没有工作区）</option>
+                    <option value={WS_GONE}>工作区已删</option>
                     {workspaces.map((w) => <option key={w.workspaceId} value={w.path}>{w.title}</option>)}
-                    {/* 已存筛选可能指向已删除的工作区：补一个兜底 option，select 永不显示空白。 */}
-                    {workspaceFilter !== 'all' && !workspaces.some((w) => w.path === workspaceFilter) && (
+                    {/* 已存筛选可能指向已删除的工作区：补一个兜底 option，select 永不显示空白。
+                        哨兵值要排除掉，否则会渲染成「已删工作区 · ?」。 */}
+                    {workspaceFilter !== 'all' && !isWorkspaceSentinel(workspaceFilter) && !workspaces.some((w) => w.path === workspaceFilter) && (
                       <option value={workspaceFilter}>已删工作区 · {pathName(workspaceFilter) || '?'}</option>
                     )}
                   </select>
@@ -4740,7 +4751,13 @@ function installSidebarStatusDots() {
         // 拿不到 group.sessions / 数组为空 = 不知道 → 按非空处理，保持显示。
         const group = sidebarAdapter.recognizeGroupQuiet(row)
         const sessions = group && Array.isArray(group.sessions) ? group.sessions : null
-        setGroupHidden(scope, aliveSessionCount(sessions, hiddenIdSet()) === 0)
+        // v0.7.0（吸收上游 PR #20）：当前会话就在本组时绝不藏——上游只为它渲染
+        // 一条 blank 行，而插件把 blank 行一律隐藏，按存活数判空会把正在用的
+        // 工作区连标题和「+」一起藏掉。
+        setGroupHidden(scope, shouldHideEmptyGroup(
+          aliveSessionCount(sessions, hiddenIdSet()),
+          group != null && group.containsCurrent === true,
+        ))
       } catch (e) { /* 单组失败不影响其它组 */ }
     })
   }
@@ -5813,7 +5830,7 @@ export function apply(ctx) {
   // 同一能力也尝试注册为客户端 cordis 服务 'lyinSessions'（可用则用）。
   try {
     const api = {
-      version: '3.10.3',
+      version: '3.11.0',
       openSession(id) {
         const target = id === null || id === undefined ? '' : String(id)
         if (!target) return false

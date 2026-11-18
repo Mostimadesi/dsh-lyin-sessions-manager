@@ -7,7 +7,7 @@
 // (workspaceRegistry + storageDomain), folds titles/dates/workspace tags from
 // session persistence, physically removes a session's log file on delete, and
 // relocates a conversation (session) between workspaces on move.
-import { appendFile, mkdir, readFile, readdir, realpath, rename, rm, stat, unlink, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, realpath, rename, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, resolve as resolvePath, sep as pathSep } from 'node:path'
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -26,6 +26,7 @@ import { createAutoArchiveStore, pickInactiveCandidates } from './auto-archive.j
 import { createSessionMetaCache, fingerprintOf, persistFingerprintOf } from './session-meta-cache.js'
 import { createTitleIndexStore } from './title-persist-index.js'
 import { createEmptyScanStore } from './empty-scan-index.js'
+import { appendDebugLog, normalizeDebugLines, DEBUG_LOG_MAX_BYTES, DEBUG_LOG_KEEP } from './debug-log.js'
 import { createActiveSessionTracker } from './active-session.js'
 import { createPersistenceAdapter } from './compat/persistence.js'
 import { detectCapabilities, requireCapability } from './compat/capabilities.js'
@@ -2165,7 +2166,12 @@ export function apply(ctx) {
     registerRoute({
       kind: 'exact',
       path: '/archived-sessions/capabilities',
-      handler: async (req, res) => json(res, { ...capabilities, buildStamp: BUILD_STAMP }),
+      handler: async (req, res) => json(res, {
+        ...capabilities,
+        buildStamp: BUILD_STAMP,
+        // v0.7.0：把 debug.log 的上限报出来，方便一眼核对「运行时是不是这份构建」。
+        debugLog: { maxBytes: DEBUG_LOG_MAX_BYTES, keep: DEBUG_LOG_KEEP },
+      }),
     })
 
     // 活跃会话心跳（客户端 → host）。0.1.7+ 起 host 无从得知 UI 当前选中了哪个
@@ -2613,13 +2619,11 @@ export function apply(ctx) {
       handler: async (req, res) => {
         try {
           const body = await readJsonBody(req)
-          const lines = body && Array.isArray(body.lines) ? body.lines.map(String).slice(0, 60) : []
-          if (lines.length) {
-            await mkdir(STATE_DIR, { recursive: true })
-            const text = lines.map((l) => '[' + new Date().toISOString() + '] ' + l).join('\n') + '\n'
-            await appendFile(join(STATE_DIR, 'debug.log'), text, 'utf8')
-          }
-          json(res, { ok: true, count: lines.length })
+          // v0.7.0：轮转 + 上限。原实现直接 appendFile，debug.log 只增不减；
+          // 现在单文件 4 MiB、保留 3 份历史，写前按「当前大小 + 本次字节」判定。
+          const lines = normalizeDebugLines(body)
+          const out = lines.length ? await appendDebugLog(STATE_DIR, lines) : { bytes: 0, rotated: false }
+          json(res, { ok: true, count: lines.length, bytes: out.bytes, rotated: !!out.rotated })
         } catch (e) {
           json(res, { ok: false, error: String((e && e.message) || e) }, 500)
         }
