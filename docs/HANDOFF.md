@@ -17,7 +17,7 @@
 | package 版本 | `3.12.0`（上游 3.7.10 → 3.8.0 面板能力 → 3.9.0 加 MCP 开关 → 3.10.0 加 skill 管理 → 3.10.1 维护栏分组 → 3.10.2 评审加固 → 3.10.3 全量自审修复 → 3.11.0 debug.log 轮转 + 已标记拆三行 + 工作区筛选哨兵 → 3.12.0 工作区归档 + `check:schema`） |
 | 目标宿主 | DSH **0.2.2-rc.1**（`D:\DeepSeek Harness`，nightly 通道） |
 | 构建 | `npm run build` → 产出 `lib/index.js` + `lib/client.js`（**产物要提交**） |
-| 测试 | `npm test`（= `node scripts/run-tests.mjs`，51 个测试文件 / 517 项，Windows 基线 4 项失败见 §7.2） |
+| 测试 | `npm test`（= `node scripts/run-tests.mjs`，52 个测试文件 / 520 项，Windows 基线 5 项失败见 §7.2） |
 | 产物一致性 | `npm run check:dist`（**必须先 commit 再跑**，它用 `git diff --exit-code -- lib` 判定） |
 | 上游格式哨兵 | `npm run check:schema`（把每份落盘索引的 schemaVersion 钉成表，与 `upstream/main` 逐个比对） |
 | 生效方式 | 纯 `lib/client.js` 改动：**刷新浏览器页面**即可；`lib/index.js`（host）改动：重启 DSH |
@@ -74,7 +74,7 @@ scripts/
   rescue-smoke.mjs      复制真实 v4 日志到临时目录，跑 32 项破坏性矩阵
   check-schema.mjs      上游落盘 schema 哨兵（npm run check:schema，见 §12.1）
   check-session-health.mjs / check-upstream-contract.mjs / compat-runtime.mjs
-tests/                  51 个 *.test.js（node:test），全量 517 项
+tests/                  52 个 *.test.js（node:test），全量 520 项
 docs/
   v01-meta-spec.md      v0.1 元数据层规格
   v01-交付与验证报告.md   四层验证栈的记录
@@ -243,7 +243,7 @@ Select-String -Path "$env:USERPROFILE\.dsh\sessions-manager\debug.log" -Pattern 
 ### 7.1 命令
 
 ```bash
-npm test                         # 全量（43 文件，约 413 项）
+npm test                         # 全量（52 文件，约 520 项）
 node --test tests/xxx.test.js    # 单文件
 node scripts/compat-smoke.mjs 0.2.2-rc.1   # 真实 cordis 加载 41 条路由
 node scripts/rescue-smoke.mjs              # 破坏性矩阵（需真实 ~/.dsh/sessions）
@@ -278,14 +278,15 @@ git stash push -u -q && npm test ; git stash pop   # 在 pristine 状态跑一�
 ### 7.3 最近一次全绿记录
 
 - build stamp `3.12.0+bf77ba84`（v3.12.0 工作区归档 + `check:schema`）
-- **517 项 / 512–513 通过 / 4–5 失败**（失败集仍是那 5 项 Windows 基线，按测试名对照，见 §7.2）——**无新增回归**
+- **520 项 / 515 通过 / 5 失败**（失败集仍是那 5 项 Windows 基线，按测试名对照，见 §7.2）——**无新增回归**
+- 路由级新增 `tests/workspace-archive-routes.test.js` 3 项（提交 `3084ab3`）：空读→归档→幂等→恢复→清空、工作区列表带 `archived` 标记、损坏索引自愈。修掉两个真 bug：`changed` 曾把 store 的异构返回值（记录/布尔/计数）直接透给前端；`createWorkspaceArchiveStore` 曾不认 `DSH_SESSIONS_MANAGER_STAR_DIR`，导致测试写进用户真实状态目录。
 - 上一版记录：build stamp `3.11.0+6806b74d`（v3.11.0 debug.log 轮转 + 已标记拆三行 + 工作区筛选哨兵），**488 项 / 484 通过 / 4 失败**
 - 再上一版：build stamp `3.10.3+5fc28754`（v0.6.3 全量自审），**468 项 / 463–464 通过 / 4–5 基线失败**
 - **2026-11-18 接手复测**（pristine `5dfb2b0`，无源码改动）：`npm run build` 正常，`npm test` **469 项 / 465 通过 / 4 失败**，失败集恰为基线四项。
 - `check:dist` exit 0（记得先 commit）
 - `check:schema` exit 0（11 份索引与 `upstream/main` 一致，2 份 local-only）
 - skill + MCP 子系统单测 **56 项全绿**：`tests/skill-rows.test.js` 21 + `tests/zip-lite.test.js` 15 + `tests/skill-routes.test.js` 5 + `tests/mcp-rows.test.js` 13 + `tests/mcp-routes.test.js` 2
-- v3.12.0 新增单测：`tests/workspace-archive.test.js` 26 项、`tests/debug-log.test.js` 12 项、`tests/check-schema.test.js` 3 项，全绿
+- v3.12.0 新增单测：`tests/workspace-archive.test.js` 26 项、`tests/workspace-archive-routes.test.js` 3 项、`tests/debug-log.test.js` 12 项、`tests/check-schema.test.js` 3 项，全绿
 - 真机：摘要条 / 筛选框 / 折叠徽标 / 可收起分组 / 吸顶 / MCP 4 行 生效；skill 三态待重启后验；工作区归档三处（维护栏按钮 / 侧栏整组折叠 / 面板列表过滤）待真机验
 
 ---
@@ -410,7 +411,7 @@ localStorage（浏览器侧）：
 | 13 | `debug.log` 轮转 | **v3.11.0 已实现**：`src/debug-log.js`，单文件 4 MiB、保留 3 个副本（`debug.log.1..3`）、总足迹 16 MiB；写入前判定、超限先轮转；`tests/debug-log.test.js` 12 项 | 已闭合；上限常量在 `src/debug-log.js` 顶部，改完记得同步 `/capabilities` 的 `debugLog` 字段断言 |
 | 10 | skill 导入导出的 license 边界 | `dsh-purge` 是**商业闭源**许可（禁止复制/修改/再分发），所以 zip 读写是自研的 `src/zip-lite.js`，未复制其任何代码 | 若日后要引入其实现，必须先取得授权 |
 | 8 | `dsh-mcp-manager` 是否删除 | **2026-11-18 已手工卸载完成**（见 §16）：补丁 `insert` 块、`package.json` 依赖、`pnpm-lock.yaml` 三段、`node_modules` 目录、`node_modules/.modules.yaml` 的 hoistedLocations、`.dsh-market/state.json` 的 disabled 项全部清理 | 重启 DSH 后复查 `/dsh-market/installed` 的 `disabled` 不再含它 |
-| 14 | **上游已前进 11 个提交**（`upstream/main` 最新 `58e8e1e`，版本 3.8.1；我们停在 merge-base `ad04522` 之后的 `5dfb2b0`） | 未同步。关键能力：`f010392` 会话菜单走官方 `contextMenus` API、`0d72015` 设置导航图标走官方 icon slot、`84cc522` 适配 DSH 0.2.2-rc.3、`cefd98f` 按「未分组 / 已删除工作区」过滤、`e514e51`+`a05ad7e` 冷标题改读官方 projection cache（新增 `src/projection-hints.js`） | 我们只打到 0.2.2-rc.1，且 `src/client/index.jsx` 几乎整文件重写；rebase 成本高、风险大。**先与用户确认是否要跟进 rc.3 适配**，再按 §12 的冲突热区表逐步重放 |
+| 14 | **上游已前进 11 个提交**（`upstream/main` 最新 `58e8e1e`，版本 3.8.1；我们停在 merge-base `ad04522` 之后的 `5dfb2b0`） | **2026-11-18 用户明确暂不升级 rc.3**。已吸收两项纯逻辑改动（v3.11.0）：`cefd98f` 的工作区筛选哨兵（`WS_UNGROUPED` / `WS_GONE` / `matchWorkspaceFilter`）与 `f010392` 的 `shouldHideEmptyGroup`（当前会话在组内时绝不整组隐藏）。其余暂不吸收：`f010392` 会话菜单走官方 `contextMenus`（依赖 0.2.2 的 portal 注册）、`0d72015` 设置图标 slot（本机 rc.1 无该现象）、`84cc522` rc.3 适配、`e514e51`+`a05ad7e` projection cache 读冷标题（宿主面具备，但改造面大、收益仅冷启动性能） | 若日后跟进 rc.3，再按 §12 的冲突热区表逐步重放；`src/projection-hints.js` 未移植 |
 
 ---
 
@@ -472,7 +473,7 @@ npm run check:schema -- --local # 没有 upstream 分支时只看本地常量是
 ## 13. 给接手会话的第一天
 
 1. 读本文件 + `git log --oneline -15`。最近一条应为 v3.12.0（工作区归档 + `check:schema`）或其后；`main` 与 `origin/main` 一致。
-2. `npm run build && npm test && npm run check:schema`，把失败数与 §7.2 的基线对齐（本机固定 4 项）。若明显超出，先查是不是本机环境变了（`git stash -u` 对照 pristine 再 `git stash pop`）。
+2. `npm run build && npm test && npm run check:schema`，把失败数与 §7.2 的基线对齐（本机 4–5 项，按测试名对照）。若明显超出，先查是不是本机环境变了（`git stash -u` 对照 pristine 再 `git stash pop`）。
 3. 打开面板，看 `debug.log` 里 `session-list:store-ready` / `panel:fit` / `host-list:loaded` 三行是否正常。
 4. 要改 UI 前，先确认改的是现役选择器（`.dsm-qa-main` / `.dsm-qa-rail`），别改已停用的 `.dsm-qa-panel`。
 5. 不要替用户做「拆三行 / 改名」这类产品决定；把方案摆出来让用户选。
@@ -537,6 +538,7 @@ npm run check:schema -- --local # 没有 upstream 分支时只看本地常量是
 - **语义 A（用户 m01112 拍板）= 只做可见性**：隐藏侧栏该工作区分组 + 面板会话列表过滤掉它的会话；**不动会话自身归档状态**，所以「已归档」视图保持干净；一键恢复即全部回来。
 - 客户端：维护栏「工作区归档：N 个」按钮 + `mv-sheet` 弹层（逐工作区归档/恢复 + 全部恢复）；会话列表先过 `visibleItemsAfterWorkspaceFold`（`peekPath` 例外：用户在下拉里显式点名已归档工作区时不折叠，否则选中后一片空白）；五个派生集合的数据源从 `sessions` 全改成 `visibleSessions`，保证计数、搜索、全选、批量操作与列表口径一致；侧栏 `dsmSyncEmptyGroups` 里按 `group.cwd` 的折叠键 `setGroupHidden(scope, true)` 整组藏。
 - 新增 `scripts/check-schema.mjs`（`npm run check:schema`）+ `tests/check-schema.test.js` 3 项自检，见 §12.1。
+- **路由级测试补上后抓到两个真 bug（`3084ab3`）**：① `/archived-sessions/workspace-archives` 的 `changed` 曾把 store 的异构返回值（`archive()` 返回记录、`unarchive()` 返回布尔、`clear()` 返回计数）直接透给前端，前端 `if (r.changed)` 对记录对象恒真；改成「前后归档数量差」判布尔，`removed` 单独回计数。② `createWorkspaceArchiveStore` 曾不认 `DSH_SESSIONS_MANAGER_STAR_DIR`，测试写盘会落到用户真实的 `~/.dsh/sessions-manager/`；目录优先级补上这一级（与 `saved-filters.js` / `pending-moves.js` / `move-notices.js` 一致）。
 
 ---
 
