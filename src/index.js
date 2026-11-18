@@ -23,6 +23,15 @@ import { createMoveNoticeStore } from './move-notices.js'
 import { sweepStaleStateTemps } from './state-temp-sweep.js'
 import { aggregateStorage } from './storage-stats.js'
 import { createAutoArchiveStore, pickInactiveCandidates } from './auto-archive.js'
+import {
+  createWorkspaceArchiveStore,
+} from './workspace-archive.js'
+import {
+  WORKSPACE_ARCHIVE_SCHEMA_VERSION,
+  archivedWorkspaceKeys,
+  isWorkspaceArchived,
+  workspaceKeyOf,
+} from './workspace-archive-core.js'
 import { createSessionMetaCache, fingerprintOf, persistFingerprintOf } from './session-meta-cache.js'
 import { createTitleIndexStore } from './title-persist-index.js'
 import { createEmptyScanStore } from './empty-scan-index.js'
@@ -707,6 +716,9 @@ export function apply(ctx) {
   const moveNotices = createMoveNoticeStore()
   // Auto-archive settings live in their own schema-v4 store, off by default.
   const autoArchive = createAutoArchiveStore()
+  // Archived workspaces (schema v1) — visibility only: hiding a whole workspace
+  // must never mutate the archive state of the conversations inside it.
+  const workspaceArchive = createWorkspaceArchiveStore()
   // 启动清扫：进程在「写临时文件 → rename」之间被杀会留下 .<name>-<pid>-<ts>.tmp
   // 孤儿（实测一次累积 153 个）。这里把 1 小时前的旧临时文件收掉，不碰正在写的。
   sweepStaleStateTemps([STATE_DIR, TRASH_DIR], {}).catch(() => {})
@@ -1531,8 +1543,16 @@ export function apply(ctx) {
 
   async function listWorkspaces() {
     const out = []
+    const archiveStore = await workspaceArchive.read()
     try {
-      for (const ent of w.list()) out.push({ workspaceId: ent.id, title: ent.title, path: ent.path })
+      for (const ent of w.list()) {
+        out.push({
+          workspaceId: ent.id,
+          title: ent.title,
+          path: ent.path,
+          archived: isWorkspaceArchived(archiveStore, ent.path),
+        })
+      }
     } catch (e) { /* ignore */ }
     return out
   }
@@ -1905,6 +1925,12 @@ export function apply(ctx) {
         return acc
       })(),
       purgedSessionIds: activeTombstones,
+      // 工作区归档（v3.12.0，语义 A = 只做可见性）：折叠后的工作区 key 列表，
+      // 侧栏按 group.cwd 折叠键比对后整组隐藏。只读下发，写入走
+      // /archived-sessions/workspace-archives，避免高频轮询触发写盘。
+      archivedWorkspaceKeys: await (async () => {
+        try { return archivedWorkspaceKeys(await workspaceArchive.read()) } catch (e) { return [] }
+      })(),
       lineage,
       // v3.6.2：还有预热/退避重试在途 → client 缩短轮询节拍，预热一完成就把
       // 补齐的标题送回（含面板自动刷新）。无预热 API 时恒 false，绝不假忙。
@@ -3123,6 +3149,52 @@ export function apply(ctx) {
           json(res, { items: await listWorkspaces() })
         } catch (e) {
           json(res, { error: String((e && e.message) || e) }, 500)
+        }
+      },
+    })
+
+    // Archived workspaces (visibility only). A plain read returns the durable
+    // list; a write is one of archive / unarchive / clear. Archiving touches no
+    // conversation: the panel filters rows and the sidebar drops the group, so
+    // un-archiving restores the previous view exactly.
+    registerRoute({
+      kind: 'exact',
+      path: '/archived-sessions/workspace-archives',
+      handler: async (req, res) => {
+        try {
+          const body = (req.method === 'POST' ? await readJsonBody(req) : null) || {}
+          const action = typeof body.action === 'string' ? body.action : ''
+          let result = null
+          if (action === 'archive') {
+            const rawPath = typeof body.path === 'string' ? body.path : ''
+            // Only paths DSH actually lists may be archived: accepting a
+            // free-form path would let a typo hide a workspace that happens to
+            // normalise the same way later.
+            const known = (await listWorkspaces()).find((ent) => workspaceKeyOf(ent.path) === workspaceKeyOf(rawPath))
+            if (!known) {
+              json(res, { ok: false, error: '未找到该工作区' }, 404)
+              return
+            }
+            result = await workspaceArchive.archive(known.path, { title: known.title })
+          } else if (action === 'unarchive') {
+            result = await workspaceArchive.unarchive(typeof body.path === 'string' ? body.path : '')
+          } else if (action === 'clear') {
+            result = await workspaceArchive.clear()
+          } else if (action) {
+            json(res, { ok: false, error: '未知操作' }, 400)
+            return
+          }
+          const store = await workspaceArchive.read()
+          json(res, {
+            ok: true,
+            action: action || 'list',
+            changed: result,
+            schemaVersion: WORKSPACE_ARCHIVE_SCHEMA_VERSION,
+            items: Object.values(store.archives).sort((a, b) => b.archivedAt - a.archivedAt),
+            keys: archivedWorkspaceKeys(store),
+          })
+        } catch (e) {
+          json(res, { ok: false, error: String((e && e.message) || e) }, errorStatus(e))
         }
       },
     })

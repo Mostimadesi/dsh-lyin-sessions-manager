@@ -13,6 +13,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { aliveSessionCount, applyTagFilter, ascPriority, canDropOnWorkspace, collapsedVisibleTotal, countRenderedVisible, dotStateFor, dragAutoScrollStep, effectiveTitleOf, filterShapeFromSaved, filterSnapshotOf, foldActivityItems, foldBranches, foldOrphanSubagents, foldSubagentRows, foldSubagents, groupQuickAccess, isWorkspaceSentinel, markedRowsByKind, matchWorkspaceFilter, shouldHideEmptyGroup, WS_GONE, WS_UNGROUPED, mergeActivityItems, normalizeCollapsed, noticeToastPlan, QA_MARKED_KIND_HINT, QA_MARKED_KIND_LABEL, QA_MARKED_KINDS, QA_RECENT_WINDOW_MS, recentActiveRows, stateFromSessionStatus, summaryCounts, openSubagentToast, overflowPlan, pathTail, priorityOf, remainingRows, reviewOf, sessionForNodes, shortId, starredOf, tagDeleteConfirm, titleBackfillDecision, toastDurationFor, workspaceForNodes } from './logic.js'
 
+import { visibleItemsAfterWorkspaceFold, workspaceKeyOf } from '../workspace-archive-core.js'
+
 export const inject = ['slots']
 
 const PANEL_PREFS_KEY = 'dsm-panel-prefs-v1'
@@ -239,6 +241,10 @@ body[data-ds-dark-theme] .archv{color-scheme:dark}
 .mv-sheet-title{font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary);margin:0}
 .mv-sheet-close{appearance:none;width:26px;height:26px;color:var(--dsw-alias-label-secondary);background:0 0;border:none;border-radius:7px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:16px;line-height:1}
 .mv-sheet-close:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
+.ws-arch-list{display:flex;flex-direction:column;max-height:320px;overflow:auto}
+.ws-arch-row{display:flex;align-items:center;gap:12px;padding:7px 0;border-top:1px solid var(--dsw-alias-border-l2)}
+.ws-arch-row:first-child{border-top:none}
+.ws-arch-name{min-width:0;flex:1;font-size:12.5px;color:var(--dsw-alias-label-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .mcp-list{display:flex;flex-direction:column}
 .mcp-row{display:flex;align-items:center;gap:12px;padding:9px 0;border-top:1px solid var(--dsw-alias-border-l2)}
 .mcp-row:first-child{border-top:none}
@@ -1345,6 +1351,11 @@ function SessionPanel({ workspacesSvc }) {
   const [aa, setAa] = useState({ settings: { inactiveDays: 0, skipStarred: true }, lastRunAt: null, lastArchivedCount: 0 })
   const [aaOpen, setAaOpen] = useState(false)
   const [aaBusy, setAaBusy] = useState(false)
+  // v3.12.0 工作区归档（语义 A = 只做可见性）：记录本身由 host 的
+  // workspace-archive store 持久化，这里只缓存「当前折叠了哪些」的状态。
+  const [wsArch, setWsArch] = useState({ items: [], keys: [] })
+  const [wsArchOpen, setWsArchOpen] = useState(false)
+  const [wsArchBusy, setWsArchBusy] = useState(false)
   const zipChecked = useRef(false)
   const [openMenu, setOpenMenu] = useState(null)
   const timer = useRef(null)
@@ -1814,6 +1825,8 @@ function SessionPanel({ workspacesSvc }) {
         setDelTarget(null)
         setConfirmBatch(false)
         loadLineage()
+        // v3.12.0：工作区折叠集合与 workspaces 一起刷新（两处都只读，开销一次文件读）。
+        loadWsArch()
         if (!targetWs && works.items && works.items.length) setTargetWs(works.items[0].workspaceId)
         loadTrash()
         // T4：标签与已存筛选的旁路读取（与 pending-moves 同一先例：失败降级，
@@ -2008,18 +2021,29 @@ function SessionPanel({ workspacesSvc }) {
     const li = item ? lineage[String(item.sessionId)] : null
     return !!(li && li.origin === 'subagent')
   }, [lineage])
+  // v3.12.0 工作区归档（语义 A = 只做可见性）：被折叠工作区里的会话在面板里
+  // 整体不出现——计数、搜索、全选、批量操作全都走这份集合，避免出现「列表里
+  // 看不到，全选却能选中」的错位。会话自身的归档状态不改，恢复后原样回来。
+  const wsFoldKeys = wsArch.keys
+  // 例外：用户在下拉里显式点名了一个已归档的工作区 —— 那就是「我要看它」，
+  // 此时不折叠，否则选中后只会看到空列表。
+  const wsPeekKey = workspaceFilter !== 'all' && !isWorkspaceSentinel(workspaceFilter) ? workspaceFilter : ''
+  const visibleSessions = useMemo(
+    () => visibleItemsAfterWorkspaceFold(sessions, wsFoldKeys, wsPeekKey),
+    [sessions, wsFoldKeys, wsPeekKey],
+  )
   // 列表管线仍要拿到子代理行（折叠判定要用它们挂到父会话下），所以保留一份
   // 未过滤的集合；只有「计数 / 顶层行 / 全选」用 topOnly。
   const { archivedAll, activeAll, starredAll, reviewAll, emptyAll } = useMemo(() => ({
-    archivedAll: sessions ? sessions.filter((x) => x.archived) : [],
-    activeAll: sessions ? sessions.filter((x) => !x.archived) : [],
-    starredAll: starredOf(sessions),
+    archivedAll: visibleSessions ? visibleSessions.filter((x) => x.archived) : [],
+    activeAll: visibleSessions ? visibleSessions.filter((x) => !x.archived) : [],
+    starredAll: starredOf(visibleSessions),
     // v0.1 元数据层：待回看视图（与收藏同型，正交于活动/归档状态）。
-    reviewAll: reviewOf(sessions),
+    reviewAll: reviewOf(visibleSessions),
     // issue #6 之三：空白会话单分一类。空白判定来自宿主血缘快照（sizeBytes 阈值
     // 实测校准），与侧栏「空白」标记同源——两处永远不会各说各话。
-    emptyAll: sessions ? sessions.filter((x) => { const li = lineage[String(x.sessionId)]; return !!(li && li.empty) }) : [],
-  }), [sessions, lineage])
+    emptyAll: visibleSessions ? visibleSessions.filter((x) => { const li = lineage[String(x.sessionId)]; return !!(li && li.empty) }) : [],
+  }), [visibleSessions, lineage])
   // 血缘分组开着时，计数只算「能作为一行被操作的会话」。平铺模式保持原样
   // （用户显式选择与 DSH 原生一致的平铺视图）。
   const topOnly = useCallback((arr) => (groupByLineage ? arr.filter((x) => !isSubagentItem(x)) : arr), [groupByLineage, isSubagentItem])
@@ -2029,12 +2053,12 @@ function SessionPanel({ workspacesSvc }) {
   const reviewList = useMemo(() => topOnly(reviewAll), [topOnly, reviewAll])
   const emptyList = useMemo(() => topOnly(emptyAll), [topOnly, emptyAll])
   // 「全部」计数：血缘分组下同样只算能作为一行的会话（子代理在父行徽标里）。
-  const totalTopCount = useMemo(() => topOnly(sessions || []).length, [topOnly, sessions])
+  const totalTopCount = useMemo(() => topOnly(visibleSessions || []).length, [topOnly, visibleSessions])
   const list = useMemo(() => {
     if (filter === 'trash') return []
     // 注意用 *All（含子代理）：列表管线要靠它们把子代理挂到父会话下；排除子代理
     // 发生在折叠之后的顶层行与计数（见 isSubagentItem / topOnly）。
-    const base = filter === 'archived' ? archivedAll : filter === 'active' ? activeAll : filter === 'starred' ? starredAll : filter === 'review' ? reviewAll : filter === 'empty' ? emptyAll : sessions || []
+    const base = filter === 'archived' ? archivedAll : filter === 'active' ? activeAll : filter === 'starred' ? starredAll : filter === 'review' ? reviewAll : filter === 'empty' ? emptyAll : visibleSessions || []
     // T4 标签筛选（单选，v1 不追多选 AND——理由见 logic.applyTagFilter）：在
     // 搜索/工作区之前先按标签收敛；''/未就绪时谓词原样返回，行为与旧版一致。
     const tagPassed = applyTagFilter(base, tagsReady ? tagFilter : '')
@@ -2054,7 +2078,7 @@ function SessionPanel({ workspacesSvc }) {
       if (sortBy === 'priority') return ascPriority(a, b)
       return Number(b.createdAt || 0) - Number(a.createdAt || 0)
     })
-  }, [sessions, archivedAll, activeAll, starredAll, reviewAll, emptyAll, filter, query, workspaceFilter, sortBy, tagFilter, tagsReady, dsmAuthoritativeTitles])
+  }, [visibleSessions, archivedAll, activeAll, starredAll, reviewAll, emptyAll, filter, query, workspaceFilter, sortBy, tagFilter, tagsReady, dsmAuthoritativeTitles])
   const selIds = Object.keys(selected).filter((k) => selected[k])
   // 「回收站」是独立视图，不共用会话列表。
   const showSessionList = filter !== 'trash'
@@ -2364,6 +2388,37 @@ function SessionPanel({ workspacesSvc }) {
         else { showToast(`已自动归档 ${n} 个会话`); if (n > 0) refresh() }
       })
       .catch((e) => { setAaBusy(false); setError(String((e && e.message) || e)) })
+  }
+
+  // 工作区归档（v3.12.0，语义 A = 只做可见性）。记录落在 host 的
+  // workspace-archives.v1.json；这里只负责读回、发起归档/恢复、并把结果
+  // 同步给侧栏用的 dsmArchivedWsKeys。
+  const applyWsArch = (r) => {
+    const items = Array.isArray(r && r.items) ? r.items : []
+    const keys = Array.isArray(r && r.keys) ? r.keys.map((k) => String(k)) : items.map((x) => String((x && x.key) || ''))
+    setWsArch({ items, keys: keys.filter(Boolean) })
+    dsmArchivedWsKeys = new Set(keys.filter(Boolean))
+    if (dsmRepaintDots) dsmRepaintDots()
+  }
+
+  const loadWsArch = () => {
+    postJSON('/archived-sessions/workspace-archives', {})
+      .then(applyWsArch)
+      .catch(() => {})
+  }
+
+  // 归档/恢复都走同一条命令通道，返回体形状一致（items 倒序 + keys）。
+  const runWsArch = (action, path, doneMsg) => {
+    if (wsArchBusy) return
+    setWsArchBusy(true)
+    postJSON('/archived-sessions/workspace-archives', action === 'archive' ? { action, path } : { action })
+      .then((r) => {
+        setWsArchBusy(false)
+        applyWsArch(r)
+        showToast(r && r.changed ? doneMsg : '没有变化')
+        refresh()
+      })
+      .catch((e) => { setWsArchBusy(false); setError(String((e && e.message) || e)) })
   }
 
   const restoreTrash = (sid) => {
@@ -2709,6 +2764,21 @@ function SessionPanel({ workspacesSvc }) {
                 自动归档{aa.settings.inactiveDays ? `：${aa.settings.inactiveDays} 天未活跃` : '：未启用'}
               </button>
               {aa.lastRunAt ? <span className="maint-note">上次检查 {fmtDate(aa.lastRunAt)}，归档 {aa.lastArchivedCount} 个</span> : <span className="maint-note">尚未检查</span>}
+              {/* v3.12.0 工作区归档：与「自动归档」并列但语义不同——自动归档按闲置天数
+                  归档会话，这里只把整个工作区从侧栏和面板列表里折叠起来，不动会话自身归档状态。 */}
+              <button
+                type="button"
+                className={'archv-btn' + (wsArch.keys.length ? ' archv-go' : '')}
+                aria-expanded={wsArchOpen}
+                title="把整个工作区从侧栏与列表里折叠起来（只做可见性，会话归档状态不变）"
+                onClick={() => {
+                  const next = !wsArchOpen
+                  setWsArchOpen(next)
+                  if (next) loadWsArch()
+                }}
+              >
+                工作区归档{wsArch.keys.length ? `：${wsArch.keys.length} 个` : '：无'}
+              </button>
               {/* v0.2.2 快捷面板外观：预设 + 细参数（netease-lyrics 同款模式）。 */}
               <button type="button" className="archv-btn" aria-expanded={qaStyleOpen} title="快捷面板的主题预设与圆角/模糊/不透明度/宽度" onClick={() => setQaStyleOpen(!qaStyleOpen)}>
                 面板外观
@@ -3167,6 +3237,43 @@ function SessionPanel({ workspacesSvc }) {
               </div>
             </div>
           )}
+          {wsArchOpen && (
+            <div className="mv-sheet" aria-label="工作区归档">
+              <div className="mv-sheet-head">
+                <h3 className="mv-sheet-title">工作区归档</h3>
+                <div className="mv-sheet-actions">
+                  {wsArch.keys.length ? (
+                    <button type="button" className="archv-btn" disabled={wsArchBusy} onClick={() => runWsArch('clear', null, '已恢复全部工作区')}>
+                      {wsArchBusy ? '处理中…' : '全部恢复'}
+                    </button>
+                  ) : null}
+                  <button type="button" className="mv-sheet-close" aria-label="关闭" onClick={() => setWsArchOpen(false)}>×</button>
+                </div>
+              </div>
+              {workspaces.length ? (
+                <div className="ws-arch-list">
+                  {workspaces.map((ws) => (
+                    <div className="ws-arch-row" key={String(ws.workspaceId || ws.path)}>
+                      <span className="ws-arch-name" title={String(ws.path || '')}>{String(ws.title || pathTail(ws.path) || ws.path || '（未命名工作区）')}</span>
+                      <button
+                        type="button"
+                        className={'archv-btn' + (ws.archived ? ' archv-go' : '')}
+                        disabled={wsArchBusy}
+                        onClick={() => runWsArch(ws.archived ? 'unarchive' : 'archive', ws.path, ws.archived ? '已恢复该工作区' : '已归档该工作区')}
+                      >
+                        {ws.archived ? '恢复' : '归档'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="archv-empty">当前宿主没有已注册的工作区</div>
+              )}
+              <div className="dtl-note">
+                归档只是把整个工作区从侧栏分组和会话列表里折叠起来，不动会话自身的归档状态，「已归档」视图也不会被塞满；点「恢复」立刻全部回来。同一个工作区目录重新创建时，归档记录保留。
+              </div>
+            </div>
+          )}
           {storageOpen && (
             <div className="mv-sheet" aria-label="存储占用">
               <div className="mv-sheet-head">
@@ -3234,7 +3341,9 @@ function SessionPanel({ workspacesSvc }) {
                         「工作区目录已经不在了的会话」——这两类在旧版只能混在「全部」里。 */}
                     <option value={WS_UNGROUPED}>未分组（没有工作区）</option>
                     <option value={WS_GONE}>工作区已删</option>
-                    {workspaces.map((w) => <option key={w.workspaceId} value={w.path}>{w.title}</option>)}
+                    {/* v3.12.0：已归档的工作区在列表里被整体折叠，下拉里标注一下，
+                        否则用户选中它只会看到空列表，以为是数据丢了。 */}
+                    {workspaces.map((w) => <option key={w.workspaceId} value={w.path}>{w.title}{w.archived ? '（已归档）' : ''}</option>)}
                     {/* 已存筛选可能指向已删除的工作区：补一个兜底 option，select 永不显示空白。
                         哨兵值要排除掉，否则会渲染成「已删工作区 · ?」。 */}
                     {workspaceFilter !== 'all' && !isWorkspaceSentinel(workspaceFilter) && !workspaces.some((w) => w.path === workspaceFilter) && (
@@ -4052,6 +4161,10 @@ let dsmTrashIds = null
 // issue #16：回收站按 cwd 的条数（host 随 sidebar-state 下发）。折叠分组下
 // 上游把 group.sessions 收回成空数组，展开计数只能靠它来扣掉插件会隐藏的行。
 let dsmTrashCountByCwd = null
+// v3.12.0 工作区归档（语义 A = 只做可见性）：已折叠的工作区 key 集合。
+// 侧栏按 group.cwd 折叠后比对、整组隐藏；面板列表按 item.workspacePath 过滤。
+// 只读：写入走 /archived-sessions/workspace-archives。
+let dsmArchivedWsKeys = new Set()
 let dsmServerPurgedIds = new Set()
 let dsmAuthoritativeTitles = new Map()
 let dsmTrashTick = 0
@@ -4121,6 +4234,10 @@ async function dsmLoadTrashIds() {
       ? new Map(Object.entries(r.trashedCountByCwd).map(([k, v]) => [String(k), Number(v) || 0]))
       : null
     dsmServerPurgedIds = new Set(((r && r.purgedSessionIds) || []).map(String))
+    // v3.12.0 工作区归档：host 下发已折叠工作区的折叠键，侧栏按 group.cwd 比对整组隐藏。
+    // 旧 host 无该字段 → 空集合，行为与 3.11.x 完全一致。
+    const wsKeys = Array.isArray(r && r.archivedWorkspaceKeys) ? r.archivedWorkspaceKeys : []
+    dsmArchivedWsKeys = new Set(wsKeys.map((k) => String(k)).filter(Boolean))
     // 服务器已确认的乐观标记随即清除；未被确认的标记最多存活到下次刷新，
     // 绝不永久压住后来同 id 的新会话。
     for (const id of [...dsmPendingPurged]) {
@@ -4729,6 +4846,14 @@ function installSidebarStatusDots() {
         // 因此向上找到真正的 groupSection（见 groupContainerOf）。
         const scope = groupContainerOf(row)
         if (!scope || scope === document.body) return
+        // v3.12.0 工作区归档：整组折叠优先于其它判定——用户显式归档了这个工作区，
+        // 就整组藏起来（含仍在渲染的行）。恢复走面板「工作区归档」里的恢复按钮。
+        const group = sidebarAdapter.recognizeGroupQuiet(row)
+        if (dsmArchivedWsKeys.size) {
+          const cwd = group && typeof group.cwd === 'string' ? group.cwd : null
+          const key = cwd ? workspaceKeyOf(cwd) : ''
+          if (key && dsmArchivedWsKeys.has(key)) { setGroupHidden(scope, true); return }
+        }
         // 组内还有没被我们藏起来的会话行 → 绝不藏（也顺手还原）。
         // 行可能被上游包在 wrapper span 里（见 groupSessionRows 的说明），
         // 因此用收集器而不是直接遍历 scope.children。
@@ -4749,7 +4874,6 @@ function installSidebarStatusDots() {
         }
         // 渲染行全被我们藏了（或一行都没渲染）：只有数据层能证明「真空」才藏。
         // 拿不到 group.sessions / 数组为空 = 不知道 → 按非空处理，保持显示。
-        const group = sidebarAdapter.recognizeGroupQuiet(row)
         const sessions = group && Array.isArray(group.sessions) ? group.sessions : null
         // v0.7.0（吸收上游 PR #20）：当前会话就在本组时绝不藏——上游只为它渲染
         // 一条 blank 行，而插件把 blank 行一律隐藏，按存活数判空会把正在用的
@@ -5830,7 +5954,7 @@ export function apply(ctx) {
   // 同一能力也尝试注册为客户端 cordis 服务 'lyinSessions'（可用则用）。
   try {
     const api = {
-      version: '3.11.0',
+      version: '3.12.0',
       openSession(id) {
         const target = id === null || id === undefined ? '' : String(id)
         if (!target) return false

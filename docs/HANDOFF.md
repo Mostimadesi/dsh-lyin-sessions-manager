@@ -3,7 +3,7 @@
 > 写给「接手后续维护的新会话 / 新维护者」。目标是让你在不读 5000 行源码的前提下，
 > 20 分钟内能改一行、构建、验证、回滚。
 >
-> 最后更新：2026-11-18（接手会话复测：build + 全量测试基线复核，补记上游 11 个提交待决项；能力范围仍是 v0.5.5 MCP 开关 + v0.6.1 skill 管理 + v0.6.2/v0.6.3 缺陷修复 / package 3.10.3）
+> 最后更新：2026-11-18（v3.12.0：debug.log 轮转、已标记拆三小行、工作区筛选哨兵、工作区归档（只做可见性）、`check:schema` 上游格式哨兵；同时手工卸载了 `dsh-mcp-manager`。能力范围 = v0.5.5 MCP 开关 + v0.6.1 skill 管理 + v0.6.2/v0.6.3 缺陷修复 + v3.12.0 工作区归档）
 
 ---
 
@@ -14,11 +14,12 @@
 | 本机仓库路径 | `D:\DeepSeek Harness\workspace\plugins_helper\session-manager-unified\dsh-lyin-sessions-manager` |
 | 分支 / 远程 | `main`；`origin` = https://github.com/Mostimadesi/dsh-lyin-sessions-manager（公开），`upstream` = TOBYCAI/dsh-sessions-manager |
 | 插件包名 | `dsh-lyin-sessions-manager`（**改包名要同时改** `build.mjs` 的 ModuleLoader banner） |
-| package 版本 | `3.10.3`（上游 3.7.10 → 3.8.0 面板能力 → 3.9.0 加 MCP 开关 → 3.10.0 加 skill 管理 → 3.10.1 维护栏分组 → 3.10.2 评审加固 → 3.10.3 全量自审修复） |
+| package 版本 | `3.12.0`（上游 3.7.10 → 3.8.0 面板能力 → 3.9.0 加 MCP 开关 → 3.10.0 加 skill 管理 → 3.10.1 维护栏分组 → 3.10.2 评审加固 → 3.10.3 全量自审修复 → 3.11.0 debug.log 轮转 + 已标记拆三行 + 工作区筛选哨兵 → 3.12.0 工作区归档 + `check:schema`） |
 | 目标宿主 | DSH **0.2.2-rc.1**（`D:\DeepSeek Harness`，nightly 通道） |
 | 构建 | `npm run build` → 产出 `lib/index.js` + `lib/client.js`（**产物要提交**） |
-| 测试 | `npm test`（= `node scripts/run-tests.mjs`，48 个测试文件 / 468 项） |
+| 测试 | `npm test`（= `node scripts/run-tests.mjs`，51 个测试文件 / 517 项，Windows 基线 4 项失败见 §7.2） |
 | 产物一致性 | `npm run check:dist`（**必须先 commit 再跑**，它用 `git diff --exit-code -- lib` 判定） |
+| 上游格式哨兵 | `npm run check:schema`（把每份落盘索引的 schemaVersion 钉成表，与 `upstream/main` 逐个比对） |
 | 生效方式 | 纯 `lib/client.js` 改动：**刷新浏览器页面**即可；`lib/index.js`（host）改动：重启 DSH |
 | 已交付能力 | 会话管理面板（标签/优先级/备注/待回看/血缘折叠/批量标注/导出）、「进行中的会话」面板（摘要条 + 最近活跃 + 已标记 + 可收起分组 + 吸顶 + 右栏标签页）、`meta-v1` 存储、owner-only 认证门（50 条路由）、MCP 服务器开关（`cordis.patch.yml` 文本手术）、skill 三态开关 + zip 导入导出 |
 
@@ -39,7 +40,7 @@ git commit -am "..." && npm run check:dist # 提交后再校验产物一致
 - 本仓库是**个人分支**：fork 后只改插件身份（`package.json` 的 name、`cordis.patch.yml` 的 id、`src/index.js` 的 `export const name`），**刻意保留**了路由前缀 `/archived-sessions`、`STATE_DIR`、`data-dsm-*` 类名、slot id —— 目的是让上游 rebase 尽量少冲突（见 §12）。
 - 另一个同类实现 `hkkz9522/dsh-session-manager` 只在 v0.1 调研阶段对照过（元数据层设计借鉴了它：标签 20/会话、优先级 1-5、备注 2000 字、待回看、API 认证门 fail-closed），**代码没有合并**。
 - 版本号有两套，别混：
-  - `package.json` 的 `3.10.3`：给 npm / 插件市场看。
+  - `package.json` 的 `3.12.0`：给 npm / 插件市场看。
   - commit message 里的 `v0.1` … `v0.5.4`：本分支的开发里程碑，只在 git log 里有意义。
 
 ---
@@ -62,14 +63,18 @@ src/
   handle-era-ops.js     SessionHandle 世代的操作适配（删除/恢复/移动）
   lineage.js            子代理血缘（origin === 'subagent' && parentSession）
   auto-archive.js       自动归档（本机因缺活动时间实际不生效，见 §10）
+  debug-log.js          debug.log 轮转与上限（v3.11.0：4 MiB × 4 = 16 MiB 足迹）
+  workspace-archive-core.js 工作区归档纯逻辑（无 node: 导入，客户端也打包它）
+  workspace-archive.js  工作区归档的文件 I/O（workspace-archives.v1.json，tmp+rename 原子写）
   compat/persistence.js 存储格式世代适配
   zstd-frame.js         直接解码压缩日志帧（turn-kind 用）
 scripts/
   run-tests.mjs         测试入口（预置 DSH_SESSIONS_MANAGER_NO_AUTH=1）
   compat-smoke.mjs      真实 cordis + 假服务，断言路由注册 + 认证门放行 owner
   rescue-smoke.mjs      复制真实 v4 日志到临时目录，跑 32 项破坏性矩阵
+  check-schema.mjs      上游落盘 schema 哨兵（npm run check:schema，见 §12.1）
   check-session-health.mjs / check-upstream-contract.mjs / compat-runtime.mjs
-tests/                  48 个 *.test.js（node:test），全量 468 项
+tests/                  51 个 *.test.js（node:test），全量 517 项
 docs/
   v01-meta-spec.md      v0.1 元数据层规格
   v01-交付与验证报告.md   四层验证栈的记录
@@ -95,7 +100,7 @@ cordis.patch.yml        插件对宿主的 patch 层（bundle.patch 指向它）
   - `src/index.js` → `lib/index.js`（ESM host）
   - `src/client/index.jsx` → `lib/client.js`（CJS，外层包 `window.__ModuleLoader__.load({ id: 'dsh-lyin-sessions-manager', factory … })`）
 - `__BUILD_STAMP__` 注入为 `${pkg.version}+${srcFingerprint}`，`lib/index.js` 里会出现一行
-  `var BUILD_STAMP = true ? "3.10.3+xxxxxxxx" : "dev";` —— **这是正常的**，每次 build 都会改这一行，提交它。
+  `var BUILD_STAMP = true ? "3.12.0+xxxxxxxx" : "dev";` —— **这是正常的**，每次 build 都会改这一行，提交它。
 - **历史事故**：`build.mjs` 的 ModuleLoader banner 里曾硬编码旧包名 `dsh-sessions-manager`，导致组合树按新名加载不到插件（`loaded without registering …`）。`check:dist` 抓不到这类问题，只有真实 web boot 能暴露。改包名时三处一起改：`package.json.name`、`cordis.patch.yml` 的 id、`build.mjs` banner。
 - `lib/` 必须提交：本机安装用 `link:`，宿主直接读工作树里的 `lib/`，不提交也不影响本机，但会让别人拿到跑不起来的包。
 
@@ -164,7 +169,13 @@ ctx.inject(['sidebarRightTabs'], (scope) => {
 | `foldSubagentRows(rows, lineage, titleOf)` | logic.js | **关注区**折叠：子代理收进父行，父行带 `▸ N 子代理` |
 | `summaryCounts(rows)` | logic.js | 顶部摘要条计数 |
 | `recentActiveRows(items, {windowMs=12h, limit=8, exclude})` | logic.js | 最近活跃区（默认 8 条） |
-| `markedRows(items, {limit=6, exclude})` | logic.js | 已标记区（收藏/待回看/P1-P2 合并去重） |
+| `markedRows(items, {limit=6, exclude})` | logic.js | 已标记区（合并去重；v3.11.0 起 UI 改走 `markedRowsByKind`，这个保留给旧测试） |
+| `markedRowsByKind(items, {now, limit, exclude})` | logic.js | 已标记区三小行（star / review / priority，每通道独立 limit 与 total；一个会话只归第一个命中类） |
+| `markKindOf(item)` | logic.js | 判定一个会话属于哪个标记通道（收藏 → 待回看 → 优先级，P3 不算） |
+| `shouldHideEmptyGroup(aliveCount, containsCurrent)` | logic.js | 空组判定（**当前会话在组内时绝不藏组**，吸收上游 f010392） |
+| `matchWorkspaceFilter(item, workspaceFilter)` | logic.js | 工作区筛选（含 `__ungrouped__` / `__workspace_gone__` 两个哨兵，吸收上游 cefd98f） |
+| `workspaceKeyOf(rawPath)` | workspace-archive-core.js | 工作区折叠键（分隔符/大小写折叠、保 UNC 前缀） |
+| `visibleItemsAfterWorkspaceFold(items, keys, peekPath)` | workspace-archive-core.js | 已归档工作区的会话过滤（`peekPath` = 下拉显式点名时放行） |
 | `foldActivityItems(items, lineage, titleOf)` | logic.js | **次级区**折叠（数据层合并：时间取子树最大、优先级取最紧急、计数累加） |
 | `mergeActivityItems(storeRows, metaById)` | logic.js | 商店快照 + meta 缓存 → 统一行 |
 | `agoLabel(ts, now)` | logic.js | 相对时间（未来/无效值返回空串） |
@@ -242,11 +253,19 @@ npm run check:sessions           # 会话日志健康检查
 
 ### 7.2 本机基线（重要）
 
-Windows 环境下有 **5 处既有失败**，与改动无关（在 pristine HEAD 上同样失败）：
+Windows 环境下有 **5 项既有失败**（数量在 4–5 之间浮动，取决于临时目录竞争），与改动无关（在 pristine HEAD 上同样失败）：
 
-1. `store: append/list/ack` 幂等类（临时目录 EBUSY）
-2. `atomic write: 0o600` ×2（MSYS 下 stat 报 0o666/438）
-3. `lineage-tree never decodes on the request path` / `cold cache returns null titles` ×2
+| 测试 | 报错 |
+| --- | --- |
+| `tests/move-notices.test.js` 的 `atomic write: 0o600, no temp leftovers, corrupt file self-heals` | `AssertionError: 438 !== 384`（MSYS 下 stat 报 0o666，权限位断言失败） |
+| `tests/saved-filters.test.js` 的 `atomic write: 0o600 mode, …` | 同上，权限位 |
+| `tests/tag-index.test.js` 的 `store: append/list/ack 幂等，坏数据宽容，TTL 过期不投递` | 同上，权限位 |
+| `tests/warm-tristate.test.js` 的 `lineage-tree never decodes on the request path; titles appear after warm` | `EBUSY: resource busy or locked, rmdir …\trash` |
+| 同文件相邻的另一项冷缓存断言 | 同上，EBUSY 连锁 |
+
+**按测试名判定，不要按行号**——这几处行号会随相邻改动漂移（v3.12.0 就从 `:42/:118/:227/:269` 漂到了 `:19/:114/:223/:269`）。
+
+单独跑某个文件时同类断言会连锁多失败几项（例如 `tests/warm-tristate.test.js` 单独跑会因 EBUSY 连锁失败 10 项），全量跑只失败 4–5 项——这是 Windows 临时目录竞争，不是代码问题。
 
 判定规则：**失败集 ⊆ 基线集** 即通过。基线对照方法：
 
@@ -258,12 +277,16 @@ git stash push -u -q && npm test ; git stash pop   # 在 pristine 状态跑一�
 
 ### 7.3 最近一次全绿记录
 
-- build stamp `3.10.3+5fc28754`（v0.6.3 全量自审）
-- **468 项 / 463–464 通过 / 4–5 基线失败**（`store: append/list/ack 幂等`、`atomic write: 0o600` ×2、`lineage-tree` ×1–2——本机 Windows 环境族，数量会在 3–5 之间浮动）
-- **2026-11-18 接手复测**（pristine `5dfb2b0`，无源码改动）：`npm run build` 正常，`npm test` **469 项 / 465 通过 / 4 失败**，失败集恰为基线四项——`tests/move-notices.test.js:42`（`438 !== 384` 权限位）、`tests/saved-filters.test.js:118`、`tests/tag-index.test.js:227`（同 `438 !== 384`）、`tests/warm-tristate.test.js:269`（`EBUSY: rmdir …\trash`）。测试总数比上面记录的 468 多 1，属上游/rebase 后的自然增长，不是新增失败。
+- build stamp `3.12.0+bf77ba84`（v3.12.0 工作区归档 + `check:schema`）
+- **517 项 / 512–513 通过 / 4–5 失败**（失败集仍是那 5 项 Windows 基线，按测试名对照，见 §7.2）——**无新增回归**
+- 上一版记录：build stamp `3.11.0+6806b74d`（v3.11.0 debug.log 轮转 + 已标记拆三行 + 工作区筛选哨兵），**488 项 / 484 通过 / 4 失败**
+- 再上一版：build stamp `3.10.3+5fc28754`（v0.6.3 全量自审），**468 项 / 463–464 通过 / 4–5 基线失败**
+- **2026-11-18 接手复测**（pristine `5dfb2b0`，无源码改动）：`npm run build` 正常，`npm test` **469 项 / 465 通过 / 4 失败**，失败集恰为基线四项。
 - `check:dist` exit 0（记得先 commit）
+- `check:schema` exit 0（11 份索引与 `upstream/main` 一致，2 份 local-only）
 - skill + MCP 子系统单测 **56 项全绿**：`tests/skill-rows.test.js` 21 + `tests/zip-lite.test.js` 15 + `tests/skill-routes.test.js` 5 + `tests/mcp-rows.test.js` 13 + `tests/mcp-routes.test.js` 2
-- 真机：摘要条 / 筛选框 / 折叠徽标 / 可收起分组 / 吸顶 / MCP 4 行 生效；skill 三态待重启后验
+- v3.12.0 新增单测：`tests/workspace-archive.test.js` 26 项、`tests/debug-log.test.js` 12 项、`tests/check-schema.test.js` 3 项，全绿
+- 真机：摘要条 / 筛选框 / 折叠徽标 / 可收起分组 / 吸顶 / MCP 4 行 生效；skill 三态待重启后验；工作区归档三处（维护栏按钮 / 侧栏整组折叠 / 面板列表过滤）待真机验
 
 ---
 
@@ -301,7 +324,8 @@ dsh plugin --profile desktop add "link:<短路径>"
 | `saved-filters.json` | 管理面板预设视图 | 上游代码 |
 | `pending-moves.json` | 排队中的跨工作区移动 | 上游代码 |
 | `auto-archive.json` | 自动归档设置 | 上游代码 |
-| `debug.log` | 客户端诊断日志（本分支） | `POST /archived-sessions/debug-log` |
+| `debug.log` | 客户端诊断日志（本分支），**v3.11.0 起自动轮转**：单文件上限 4 MiB，保留 3 个副本（`debug.log.1..3`），合计上限 16 MiB，可在 `GET /archived-sessions/capabilities` 的 `debugLog` 字段核对运行时值 | `POST /archived-sessions/debug-log` → `src/debug-log.js` |
+| `workspace-archives.v1.json` | **本分支新增（v3.12.0）**：`{ schemaVersion: 1, archives: { <折叠后的工作区路径>: {key, path, title, archivedAt} } }`。语义 A = 只做可见性，不动会话归档状态 | `src/workspace-archive.js` |
 
 `meta-v1` 语义（`setMeta`）：
 - 省略某个键 = 保持原值；传 `null` / `''` / `false` = 清除。
@@ -358,25 +382,34 @@ localStorage（浏览器侧）：
 29. **`dsmMetaCache` 要整表替换**：只 `set` 不 `delete` 的话，被删/被移走的会话永远留在面板里，「共 N 个会话」只增不减，已标记/最近活跃还会列出已删除的会话。
 30. **侧栏增强的 `setInterval` 要能被卸载**：`apply()` 里 60s 兜底刷新的 timer 必须挂到 `dsmSidebarCleanup`，由 `dsmTeardownSidebarAug()` 清算。没有它，停用插件或 HMR 后旧闭包会活到页面关闭，还在后台打 `/archived-sessions/sessions`。
 
+### 工作区归档 / debug.log（v3.11.0–v3.12.0 踩出来的）
+
+31. **`debug.log` 首次写不要轮转**：`shouldRotate(cur, inc, max)` 里 `cur <= 0 || inc <= 0` 直接返回 `false`。否则新装用户的第一次写就会先转出一个空的 `debug.log.1`，日志目录平白多一份空文件。
+32. **读文件的归一化函数必须是纯函数**：`normalizeArchivedAt` 对缺失/非法的时间戳返回 **0** 而不是 `Date.now()`。返回 `Date.now()` 会让「读同一份文件」产生不同结果，每次读都重排列表顺序（`list()` 按 `archivedAt` 倒序）。时间戳只能由写入方显式盖章。
+33. **坏记录一律丢弃，不要补默认值**：`normalizeWorkspaceArchiveStore` 对没有 `path` 的记录直接跳过。丢一条记录只会「把这个工作区重新显示出来」，永远比「误藏一个工作区」安全。
+34. **「已归档工作区」的会话要在所有派生集合里一起过滤**：面板的 `archivedAll` / `activeAll` / `starredAll` / `reviewAll` / `emptyAll` / `totalTopCount` 全部改成从 `visibleSessions` 派生，而不是只过滤最终列表。只过滤列表的后果是「看不到却能全选」「计数比列表长」。
+35. **下拉显式点名已归档工作区时要放行**：`visibleItemsAfterWorkspaceFold` 的 `peekPath` 参数就是干这个的。不放行的话，用户在工作区下拉里选中一个已归档工作区，看到的是空列表——看着像数据丢了。同时下拉本身要标注「（已归档）」，让用户事先知道。
+36. **`workspaceKeyOf` 要保 UNC 前缀**：`\\server\share` 直接 `replace(/\/{2,}/g,'/')` 会折叠成 `\server\share`，两个不同的网络路径就成了同一个键。折叠前先记下 `startsWith('//')`，折叠后补回一个 `/`。
+
 ---
 
 ## 11. 待办 / 开放问题
 
 | 序号 | 事项 | 现状 | 建议 |
 | --- | --- | --- | --- |
-| 1 | 「收藏 / 待回看 / 优先级」在「已标记」区是否拆成三小行 / 改名「我标注过的」/ 保持合并 | 三个方案已给用户，**用户未选** | 先别动，等用户拍板 |
+| 1 | 「收藏 / 待回看 / 优先级」在「已标记」区是否拆成三小行 | **v3.11.0 已拆**：用户拍板「可以拆成三小行」。`logic.markedRowsByKind` 按 star → review → priority 分通道（一个会话只归第一个命中类，`badges` 仍显示全部标记），折叠键是 `sec:marked:star` / `sec:marked:review` / `sec:marked:priority` | 已闭合；改口径先看 `tests/panel-sections.test.js` 的 4 项断言 |
 | 2 | 右栏（侧边栏）形态的滚动/高度是否真的生效 | **2026-11-18 已验证生效**：`panel:fit avail=738 anc=div.acoR2W_tabBody ch=744`，`panel:scroll 0:div.dsm-qa-rail oy=auto ch=351 sh=351`（rail 内容不溢出，故无需滚动）；主面板侧 `0:div.dsm-qa-main oy=auto ch=487 sh=487` 同样不溢出 | 若日后内容变多，复查 `ch > sh` 且 `oy` 可滚即可，无需再改代码 |
-| 3 | 工作区归档 / 可见性（上游有、本分支未移植） | v0.2 就决定推迟 | 若用户要，参考上游 `hkkz9522` 版实现 |
-| 4 | `window.__dshSessionsManager.version` 已同步为 `3.10.3` | 已改 | 以后升 package 版本时顺手同步这一行（`src/client/index.jsx` 的 `version:` 字段） |
+| 3 | 工作区归档 / 可见性 | **v3.12.0 已移植**（用户选语义 A = 只做可见性）：`src/workspace-archive-core.js` 纯逻辑 + `src/workspace-archive.js` 文件 I/O + 路由 `/archived-sessions/workspace-archives` + 维护栏「工作区归档」sheet + 侧栏 `setGroupHidden` 整组折叠 + 面板 `visibleItemsAfterWorkspaceFold` 过滤。**不动会话归档状态**，所以「已归档」视图保持干净 | 已闭合；语义若要改成「同时归档会话」，改 host 路由的 archive 分支即可，UI 不用动 |
+| 4 | `window.__dshSessionsManager.version` | **v3.12.0 已同步**（现为 `3.12.0`） | 升 package 版本时要同步 5 处：`package.json`、`package-lock.json`（2 处）、`README.md` 的 badge、`src/client/index.jsx` 的 `version:` 字段 |
 | 5 | `dsmFitPanel` 无单测（依赖 DOM） | 靠日志验证 | 若要测，抽纯函数算 `avail` 再测 |
-| 6 | 上游若有新版格式 | 未跟踪 | 见 §12 |
+| 6 | 上游若有新版格式（落盘 schema 漂移） | **v3.12.0 已加哨兵**：`npm run check:schema` 把 11 份落盘索引的 schemaVersion 钉成表，与 `upstream/main` 逐文件比对；`tests/check-schema.test.js` 3 项自检防止哨兵本身失效（常量改名、新增 store 忘了登记都会红） | 每次 rebase 前跑一次；上游改了版本号就按 §12 末尾的「schema 漂移处置」走 |
 | 7 | MCP 服务器开关（`/archived-sessions/mcp/*` + 维护栏 sheet） | 已实现并通过单测（`tests/mcp-rows.test.js` 13 项 + `tests/mcp-routes.test.js` 2 项） | 真机点一遍；确认重启后 MCP 连接按新开关状态建立 |
 | 9 | skill 列表管理（`/archived-sessions/skills/*` + 维护栏 sheet） | 已实现；单测 `tests/skill-rows.test.js` 21 项 + `tests/zip-lite.test.js` 15 项 + `tests/skill-routes.test.js` 5 项全绿 | 真机点一遍三态；确认切换后下一次对话里模型看到的目录随之变化 |
 | 11 | skill 子系统的评审 16 条 | 全部处理完毕（v0.6.2）：服务端只读校验、解压炸弹、重复条目、重复键、行内注释、CRLF、`on` 不动点、tmp 撞名、客户端导出校验、覆盖备份、`import-dir` 的 srcDir 白名单、delete 强制 name、以及 4 处测试缺口 | 若再改 skill 子系统，先读 §10 的 17–26 条 |
 | 12 | v0.6.3 全量自审修复的 4 项（MCP 原子写+回读校验、skill 删除进回收站、`dsmMetaCache` 整表替换、侧栏 interval 可卸载） | 全部已修并有回归测试（v0.6.3，§10 第 27–30 条） | 改这几处前先读 §10 第 27–30 条，别把「回收站放进 skills 根」这类坑再踩一遍 |
-| 13 | `~/.dsh/sessions-manager/debug.log` 无轮转 | 2026-11-18 实测 174 KB / 2262 行，重启后继续增长 | 若要长期保留，加个大小上限或按日期切分 |
+| 13 | `debug.log` 轮转 | **v3.11.0 已实现**：`src/debug-log.js`，单文件 4 MiB、保留 3 个副本（`debug.log.1..3`）、总足迹 16 MiB；写入前判定、超限先轮转；`tests/debug-log.test.js` 12 项 | 已闭合；上限常量在 `src/debug-log.js` 顶部，改完记得同步 `/capabilities` 的 `debugLog` 字段断言 |
 | 10 | skill 导入导出的 license 边界 | `dsh-purge` 是**商业闭源**许可（禁止复制/修改/再分发），所以 zip 读写是自研的 `src/zip-lite.js`，未复制其任何代码 | 若日后要引入其实现，必须先取得授权 |
-| 8 | `dsh-mcp-manager` 是否删除 | 用户计划整合完成后移除，当前仍在 profile 依赖里且被 `disabled: true` 停用 | 用户自行 `dsh plugin --profile desktop remove dsh-mcp-manager`；本插件的 MCP 能力**不依赖它** |
+| 8 | `dsh-mcp-manager` 是否删除 | **2026-11-18 已手工卸载完成**（见 §16）：补丁 `insert` 块、`package.json` 依赖、`pnpm-lock.yaml` 三段、`node_modules` 目录、`node_modules/.modules.yaml` 的 hoistedLocations、`.dsh-market/state.json` 的 disabled 项全部清理 | 重启 DSH 后复查 `/dsh-market/installed` 的 `disabled` 不再含它 |
 | 14 | **上游已前进 11 个提交**（`upstream/main` 最新 `58e8e1e`，版本 3.8.1；我们停在 merge-base `ad04522` 之后的 `5dfb2b0`） | 未同步。关键能力：`f010392` 会话菜单走官方 `contextMenus` API、`0d72015` 设置导航图标走官方 icon slot、`84cc522` 适配 DSH 0.2.2-rc.3、`cefd98f` 按「未分组 / 已删除工作区」过滤、`e514e51`+`a05ad7e` 冷标题改读官方 projection cache（新增 `src/projection-hints.js`） | 我们只打到 0.2.2-rc.1，且 `src/client/index.jsx` 几乎整文件重写；rebase 成本高、风险大。**先与用户确认是否要跟进 rc.3 适配**，再按 §12 的冲突热区表逐步重放 |
 
 ---
@@ -409,17 +442,42 @@ npm run check:dist
 - localStorage 键 `dsm-qa-style-v1` / `dsm-qa-collapsed-v1`
 - `data-dsm-*` 类名（CSS 与用户视觉习惯）
 
+### 12.1 schema 漂移处置（v3.12.0 加的哨兵）
+
+本仓库与上游共用 `STATE_DIR` 与同一批文件名（`star.json` / `tags.json` / `session-meta.json` / `auto-archive.json` …）。上游若改了某份索引的 `schemaVersion` 或字段语义，本分支升级后会读到陌生数据；而两边都做「坏数据宽容」，症状是**安静地丢记录**而不是崩溃——所以必须靠主动检查。
+
+```bash
+npm run check:schema            # 与 upstream/main 逐文件比对
+npm run check:schema -- --local # 没有 upstream 分支时只看本地常量是否与表一致
+```
+
+输出每行一个落盘文件，结论是这五种之一：
+
+| 结论 | 含义 | 处理 |
+| --- | --- | --- |
+| `same` | 与上游同版本 | 无需动作 |
+| `local-only` | 本分支独有的索引（`session-meta.json`、`workspace-archives.v1.json`） | 无需动作 |
+| `LOCAL-MISMATCH` | 表里写的版本 ≠ 源码常量 | 改表或改常量，二者必须一致（否则哨兵已失效） |
+| `UPSTREAM-GONE` | 上游删了这份索引或改了文件名 | 检查上游是否换了存储方式；本分支的旧文件会变成孤儿 |
+| `DRIFT` | 上游改了版本号 | **必须处理**，见下 |
+
+遇到 `DRIFT` 二选一：
+1. **写迁移**：按上游新 schema 升本分支常量，并在读取路径里兼容旧版本（参考 `src/auto-archive.js` 的 `normalizeAutoArchiveStore` 全量收敛写法），然后把 `TABLE` 里的 `version` 改成新值。
+2. **显式拒绝**：确认本分支不消费上游那份数据（或上游那份数据纯属上游自用）后，在本节记录「已知漂移，不兼容旧版本」，并把 `TABLE` 该行标成 `local-only`。
+
+改完都要跑 `npm run check:schema` 与 `node --test tests/check-schema.test.js`（3 项自检：常量能扫到、本地自洽、新增 store 已登记）。
+
 ---
 
 ## 13. 给接手会话的第一天
 
-1. 读本文件 + `git log --oneline -15`。最近一条应为 v0.6.3（全量自审修复）或其后；`main` 与 `origin/main` 一致。
-2. `npm run build && npm test`，把失败数与 §7.2 的基线对齐（本机 3–5 项浮动）。若明显超出，先查是不是本机环境变了（`git stash -u` 对照 pristine 再 `git stash pop`）。
+1. 读本文件 + `git log --oneline -15`。最近一条应为 v3.12.0（工作区归档 + `check:schema`）或其后；`main` 与 `origin/main` 一致。
+2. `npm run build && npm test && npm run check:schema`，把失败数与 §7.2 的基线对齐（本机固定 4 项）。若明显超出，先查是不是本机环境变了（`git stash -u` 对照 pristine 再 `git stash pop`）。
 3. 打开面板，看 `debug.log` 里 `session-list:store-ready` / `panel:fit` / `host-list:loaded` 三行是否正常。
 4. 要改 UI 前，先确认改的是现役选择器（`.dsm-qa-main` / `.dsm-qa-rail`），别改已停用的 `.dsm-qa-panel`。
 5. 不要替用户做「拆三行 / 改名」这类产品决定；把方案摆出来让用户选。
 6. 每次提交都跑 `check:dist`，并且把 `lib/` 一起提交。
-7. 改 skill / MCP 子系统前先读 §10 的 17–30 条——那十四条全是评审与自审实测出来的真缺陷，且都有回归测试兜着，改的时候别把它们改回去。
+7. 改 skill / MCP 子系统前先读 §10 的 17–30 条——那十四条全是评审与自审实测出来的真缺陷，且都有回归测试兜着，改的时候别把它们改回去。改工作区归档或 debug.log 前读 §10 的 31–36 条。
 8. `edit` 工具写 `src/client/index.jsx` 会产出 **CRLF**。改完用 `git diff --stat` 看行数，异常就用 node `.replace(/\r\n/g,'\n')` 归一化后再 `commit --amend`；长文件优先用 python/node 脚本改而不是 `edit`。
 
 ---
@@ -443,9 +501,9 @@ npm run check:dist
 - 不要在命令里回显 token；CC Safety Net 也会拦 `~/.git-credentials`、`~/.ssh` 的读取。
 - 推送体积：`git count-objects -vH` 约 5.6 MiB（`lib/` 已提交、`node_modules` 忽略），常见网络下 push 可能要 30s 以上，别用 30s 超时的前台命令。
 
-## 15. 最近三代改了什么（v0.6.1 → v0.6.3）
+## 15. 最近几代改了什么（v0.6.1 → v3.12.0）
 
-新会话不必回看 git log 的全部细节，这一节就是浓缩版；每条都能在 §10 找到对应的坑与纪律。
+新会话不必回看 git log 的全部细节，这一节就是浓缩版；每条都能在 §10 找到对应的坑与纪律。v3.11.0 与 v3.12.0 两节是最近新增的。
 
 ### v0.6.1 — skill 管理（`1223c46`）
 - 新增 `src/skill-rows.js`（扫描宿主 skill 根、读/写 SKILL.md frontmatter、三态映射、导入导出、删除）与 `src/zip-lite.js`（零依赖 zip，只用 `node:zlib`）。
@@ -464,6 +522,59 @@ npm run check:dist
 - `deleteSkillDir` 默认移进 `~/.dsh/sessions-manager-trash/skills`（返回 `trashed`），不再硬删。
 - `dsmMetaCache` 改整表替换（被删/被移走的会话不再常驻面板）。
 - 侧栏 60s 兜底刷新的 `setInterval` 挂到 `dsmSidebarCleanup`，由 `dsmTeardownSidebarAug()` 清算。
+
+### v3.11.0 — 日志轮转 + 已标记拆三行 + 上游筛选哨兵（`41113e7` + `f4802da`）
+- 新增 `src/debug-log.js`：`debug.log` 单文件 4 MiB、保留 3 个副本（`debug.log.1..3`）、总足迹 16 MiB。写入前用 `shouldRotate()` 判定（`cur<=0` 或 `inc<=0` 直接不轮转，避免首次写就造空 `.1`），超限先 `rotateDebugLog()` 再 append。`/archived-sessions/debug-log` 的响应多回 `bytes` / `rotated`，`/capabilities` 多回 `debugLog: {maxBytes, keep}` 便于确认运行时是不是这份构建。
+- `src/client/logic.js` 加 `QA_MARKED_KINDS` / `QA_MARKED_KIND_LABEL` / `QA_MARKED_KIND_HINT` / `markKindOf` / `markedRowsByKind`：把「已标记」按 star → review → priority 拆成三小行（一个会话只归第一个命中类，`badges` 仍显示全部标记），折叠键 `sec:marked:star` 等。原 `markedRows` / `markBadges` 保留未删（旧测试仍在用）。
+- 吸收上游 `cefd98f` 的工作区筛选哨兵：`WS_UNGROUPED='__ungrouped__'` / `WS_GONE='__workspace_gone__'` / `isWorkspaceSentinel` / `matchWorkspaceFilter`，下拉里多出「未分组（没有工作区）」「工作区已删」两项；兜底 option 要排除哨兵值，否则渲染成「已删工作区 · ?」。
+- 吸收上游 `f010392` 的 `shouldHideEmptyGroup(aliveCount, containsCurrent)`：**当前会话在组内时绝不藏组**。上游只渲染「当前会话」那一条 blank 行，插件又把 blank 行一律隐藏，组内可见数为 0；按 `aliveSessionCount === 0` 判空会把用户正在用的工作区连标题和「+」一起藏掉。
+
+### v3.12.0 — 工作区归档 + 上游格式哨兵
+- 新增 `src/workspace-archive-core.js`（纯逻辑，无 `node:` 导入，客户端也打包它）：`WORKSPACE_ARCHIVE_SCHEMA_VERSION = 1`、`workspaceKeyOf`（折叠分隔符与大小写、保 UNC 前缀、去尾斜杠）、`normalizeWorkspaceArchiveRecord` / `normalizeWorkspaceArchiveStore`（坏记录丢弃——丢记录只会「显示工作区」，永不「误藏」）、`archivedWorkspaceKeys` / `isWorkspaceArchived` / `pickArchivedWorkspaceItems` / `storeFromKeys` / `visibleItemsAfterWorkspaceFold`。
+- `normalizeArchivedAt` **刻意返回 0 而不是 `Date.now()`**：读文件必须是字节的纯函数，否则每次读都会重排列表顺序；时间戳由写入方显式盖章。
+- 新增 `src/workspace-archive.js`（只做文件 I/O，照 `src/auto-archive.js` 骨架）：`createWorkspaceArchiveStore({dir, indexPath})`，落盘 `workspace-archives.v1.json`，tmp + rename 原子写、`mode: 0o600`、单链 `mutate` 队列。**没照抄参考实现的锁文件**——本插件没有跨进程写者，锁是多余复杂度。
+- 新路由 `/archived-sessions/workspace-archives`（POST `archive` / `unarchive` / `clear`，GET 纯读）：`archive` 时先在 `listWorkspaces()` 里按折叠键找条目，**找不到回 404**（防止自由路径把「碰巧同形」的工作区藏掉）。
+- **语义 A（用户 m01112 拍板）= 只做可见性**：隐藏侧栏该工作区分组 + 面板会话列表过滤掉它的会话；**不动会话自身归档状态**，所以「已归档」视图保持干净；一键恢复即全部回来。
+- 客户端：维护栏「工作区归档：N 个」按钮 + `mv-sheet` 弹层（逐工作区归档/恢复 + 全部恢复）；会话列表先过 `visibleItemsAfterWorkspaceFold`（`peekPath` 例外：用户在下拉里显式点名已归档工作区时不折叠，否则选中后一片空白）；五个派生集合的数据源从 `sessions` 全改成 `visibleSessions`，保证计数、搜索、全选、批量操作与列表口径一致；侧栏 `dsmSyncEmptyGroups` 里按 `group.cwd` 的折叠键 `setGroupHidden(scope, true)` 整组藏。
+- 新增 `scripts/check-schema.mjs`（`npm run check:schema`）+ `tests/check-schema.test.js` 3 项自检，见 §12.1。
+
+---
+
+## 16. 手工卸载 `dsh-mcp-manager`（2026-11-18 实录）
+
+背景：本插件的 MCP 开关能力不依赖 `dsh-mcp-manager`，用户要把它彻底移除，但市场（`dshmarket`）两条路都走不通。这节记录为什么以及怎么手工做完的，第二次遇到同类问题时照抄。
+
+### 16.1 两道关卡
+
+**关卡一：`cordis.patch.yml` 的 `insert` 引用**
+市场在 `node_modules/dshmarket/lib/patch.js:181` 有 `export function userPatchPackageReferences(patchPath, packageName)`：解析补丁文本，收集所有 `insert` 行里的 `name`，命中即返回清单。返回非空数组 → **市场拒绝卸载且不可 force**；返回 `null`（补丁无法解析）→ 属「不可判定」，可以 `force` 绕过。
+报错文案在 `node_modules/dshmarket/lib/routes.js:6197`（不是 app.asar —— 在 asar 里搜中文永远 0 命中，别浪费时间）。
+
+**关卡二：`removeBundle` 的 `not-removable`**
+宿主 `app.asar` 里：
+```js
+const bundle = (await this.listBundles()).find((item) => item.name === name);
+if (bundle === void 0 || !bundle.removable) throw new ManagementFailure("not-removable");
+```
+`readBundles()` 的名字来源是 `dsh.profile.bundles` ∪ `manifest.dependencies` ∪ 已安装记录 ∪ 目录扫描，所以「在 dependencies 里、不在 bundles 里」**不会**导致 `bundle === void 0`。真正的拦路者往往是 409 `agentsBusy`（`routes.js:6205`，「有 agent 正在运行」），关掉/等完所有会话即可。
+
+### 16.2 手工卸载步骤（按顺序）
+
+目标目录：`C:\Users\<用户名>\.dsh\profiles\desktop\`。**每一步前先备份**。
+
+1. **补丁块**：删 `cordis.patch.yml` 里 `- insert:` 及其下的 `- id: mcp-manager` / `name: dsh-mcp-manager`，同时删 `- id: mcp-manager` + `disabled: true` 覆盖行。**如果改用注释而不是删除，必须把 `- insert:` 一起注释掉**——只注内容会让 YAML 解析出 `insert: null`，宿主判整个 profile 非法。
+2. **`package.json`**：从 `dependencies` 删该行。`dsh.profile.bundles` 本来就不含它（已 unbundle），不用动。
+3. **`pnpm-lock.yaml`**：删三段 —— importers 里的 `      dsh-mcp-manager:\n        specifier: …\n        version: …`、`packages:` 下的 `  dsh-mcp-manager@0.6.0:` 及其 `resolution:`、`snapshots:` 下的 `  dsh-mcp-manager@0.6.0: {}`。**不要跑 `pnpm install --fix-lockfile`**（会重解析整张图）；本机 lockfile 另有 `billion-context` 版本漂移，跑 install 会先撞 `ERR_PNPM_LOCKFILE_MISSING_DEPENDENCY`。手写手术时先 `split(chunk).length-1 === 1` 断言唯一匹配再 replace，删完用 `node_modules/js-yaml` 解析验证。
+4. **`node_modules/dsh-mcp-manager`**：先 `lstat` 确认不是符号链接、`realpath` 等于自身、父目录是 `node_modules`，再 `fs.rmSync(dir, {recursive:true, force:true})`。
+5. **`node_modules/.modules.yaml`**：删 `hoistedLocations` 里 `"dsh-mcp-manager@0.6.0": [...]` 那一行（pnpm 元数据，留着无害但下次 install 才自愈）。
+6. **`.dsh-market/state.json`**：从 `disabled` 数组里去掉该包。**这个文件是单行压缩 JSON、无缩进、无尾换行**（市场自己的 `writeMarketState` 就是 `JSON.stringify({...})`，字段顺序 `disabled, groups, groupOrder, favorites?, blocked?, updateExempt?, notes?, …`），用 `JSON.stringify(s, null, 2)` 写回虽然语义等价，但形态就与市场不一致了。
+7. **重启 DSH**，然后 `GET /dsh-market/installed` 复查：`present` / `bundles` / `unbundled` 都不含它，`activation` 里没有该 key，`disabled` 也不再含它。
+
+### 16.3 不该做的事
+
+- **不要在 app.asar 里搜中文报错文案**：`无法卸载` / `仍通过 insert 引用` / `桌面端自己管理` / `市场不能移除它` 全部 0 命中。中文文案在 `node_modules/dshmarket/lib/*.js` 里；asar 里只有逻辑和 zod 枚举字面量。
+- **不要为了卸载一个包跑 `--fix-lockfile`**：会把整张依赖图重解析，牵连到无关包。
+- **不要相信「bundles 里没有 → bundle === void 0」这个推断**：`readBundles()` 会把 `dependencies` 里的每个名字都产出一条。
 
 ---
 
