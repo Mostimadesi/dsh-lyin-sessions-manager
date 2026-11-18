@@ -3,7 +3,7 @@
 > 写给「接手后续维护的新会话 / 新维护者」。目标是让你在不读 5000 行源码的前提下，
 > 20 分钟内能改一行、构建、验证、回滚。
 >
-> 最后更新：2026-11-14（v0.5.5 MCP 开关 + v0.6.1 skill 管理 + v0.6.2/v0.6.3 缺陷修复 / package 3.10.3）
+> 最后更新：2026-11-18（接手会话复测：build + 全量测试基线复核，补记上游 11 个提交待决项；能力范围仍是 v0.5.5 MCP 开关 + v0.6.1 skill 管理 + v0.6.2/v0.6.3 缺陷修复 / package 3.10.3）
 
 ---
 
@@ -260,6 +260,7 @@ git stash push -u -q && npm test ; git stash pop   # 在 pristine 状态跑一�
 
 - build stamp `3.10.3+5fc28754`（v0.6.3 全量自审）
 - **468 项 / 463–464 通过 / 4–5 基线失败**（`store: append/list/ack 幂等`、`atomic write: 0o600` ×2、`lineage-tree` ×1–2——本机 Windows 环境族，数量会在 3–5 之间浮动）
+- **2026-11-18 接手复测**（pristine `5dfb2b0`，无源码改动）：`npm run build` 正常，`npm test` **469 项 / 465 通过 / 4 失败**，失败集恰为基线四项——`tests/move-notices.test.js:42`（`438 !== 384` 权限位）、`tests/saved-filters.test.js:118`、`tests/tag-index.test.js:227`（同 `438 !== 384`）、`tests/warm-tristate.test.js:269`（`EBUSY: rmdir …\trash`）。测试总数比上面记录的 468 多 1，属上游/rebase 后的自然增长，不是新增失败。
 - `check:dist` exit 0（记得先 commit）
 - skill + MCP 子系统单测 **56 项全绿**：`tests/skill-rows.test.js` 21 + `tests/zip-lite.test.js` 15 + `tests/skill-routes.test.js` 5 + `tests/mcp-rows.test.js` 13 + `tests/mcp-routes.test.js` 2
 - 真机：摘要条 / 筛选框 / 折叠徽标 / 可收起分组 / 吸顶 / MCP 4 行 生效；skill 三态待重启后验
@@ -330,7 +331,7 @@ localStorage（浏览器侧）：
 
 ### 工具 / 环境
 
-8. **asar 取证**：`D:\DeepSeek Harness\workspace\plugins_helper\everos-session-shim\asar-context.cjs`（`node asar-context.cjs <app.asar> <needle...>`）。haystack 按 **latin1** 解码 → **中文 needle 永远命不中**，只能用 ASCII 标识符；`app.asar` 是文件不是目录，别对它跑 grep。
+8. **asar 取证**：`D:\DeepSeek Harness\workspace\plugins_helper\dsh-debug-tools\asar-context.cjs`（`node asar-context.cjs <app.asar> <needle...>`）。haystack 按 **latin1** 解码 → **中文 needle 永远命不中**，只能用 ASCII 标识符；`app.asar` 是文件不是目录，别对它跑 grep。
 9. **apply_patch 的转义坑**：要往文件里写 `\"`，`new_text` 必须传 `\\\"`；否则落成裸 `"`，package.json 直接变非法 JSON（`ERR_INVALID_PACKAGE_CONFIG … position 413`）。
 10. **write 工具的 `\0` 坑**：源码里写 `\0` 会落成真实 NUL 字节，文件被判 binary；写 JSON 解析用的 `\x00` 要写成 `\\x00`。
 11. **pwsh 不支持 `<` 重定向**（`RedirectionNotSupported`）：用 `Get-Content -Raw x | node …`。
@@ -364,7 +365,7 @@ localStorage（浏览器侧）：
 | 序号 | 事项 | 现状 | 建议 |
 | --- | --- | --- | --- |
 | 1 | 「收藏 / 待回看 / 优先级」在「已标记」区是否拆成三小行 / 改名「我标注过的」/ 保持合并 | 三个方案已给用户，**用户未选** | 先别动，等用户拍板 |
-| 2 | 右栏（侧边栏）形态的滚动/高度是否真的生效 | 已加 `dsmFitPanel`，但用户当时会话数不够没测到；`panel:fit` 日志待下次打开面板确认 | 看 `avail` 与 `ch/sh` 是否合理 |
+| 2 | 右栏（侧边栏）形态的滚动/高度是否真的生效 | **2026-11-18 已验证生效**：`panel:fit avail=738 anc=div.acoR2W_tabBody ch=744`，`panel:scroll 0:div.dsm-qa-rail oy=auto ch=351 sh=351`（rail 内容不溢出，故无需滚动）；主面板侧 `0:div.dsm-qa-main oy=auto ch=487 sh=487` 同样不溢出 | 若日后内容变多，复查 `ch > sh` 且 `oy` 可滚即可，无需再改代码 |
 | 3 | 工作区归档 / 可见性（上游有、本分支未移植） | v0.2 就决定推迟 | 若用户要，参考上游 `hkkz9522` 版实现 |
 | 4 | `window.__dshSessionsManager.version` 已同步为 `3.10.3` | 已改 | 以后升 package 版本时顺手同步这一行（`src/client/index.jsx` 的 `version:` 字段） |
 | 5 | `dsmFitPanel` 无单测（依赖 DOM） | 靠日志验证 | 若要测，抽纯函数算 `avail` 再测 |
@@ -373,9 +374,10 @@ localStorage（浏览器侧）：
 | 9 | skill 列表管理（`/archived-sessions/skills/*` + 维护栏 sheet） | 已实现；单测 `tests/skill-rows.test.js` 21 项 + `tests/zip-lite.test.js` 15 项 + `tests/skill-routes.test.js` 5 项全绿 | 真机点一遍三态；确认切换后下一次对话里模型看到的目录随之变化 |
 | 11 | skill 子系统的评审 16 条 | 全部处理完毕（v0.6.2）：服务端只读校验、解压炸弹、重复条目、重复键、行内注释、CRLF、`on` 不动点、tmp 撞名、客户端导出校验、覆盖备份、`import-dir` 的 srcDir 白名单、delete 强制 name、以及 4 处测试缺口 | 若再改 skill 子系统，先读 §10 的 17–26 条 |
 | 12 | v0.6.3 全量自审修复的 4 项（MCP 原子写+回读校验、skill 删除进回收站、`dsmMetaCache` 整表替换、侧栏 interval 可卸载） | 全部已修并有回归测试（v0.6.3，§10 第 27–30 条） | 改这几处前先读 §10 第 27–30 条，别把「回收站放进 skills 根」这类坑再踩一遍 |
-| 13 | `~/.dsh/sessions-manager/debug.log` 无轮转 | 已 160 KB / 2100+ 行，重启后继续增长 | 若要长期保留，加个大小上限或按日期切分 |
+| 13 | `~/.dsh/sessions-manager/debug.log` 无轮转 | 2026-11-18 实测 174 KB / 2262 行，重启后继续增长 | 若要长期保留，加个大小上限或按日期切分 |
 | 10 | skill 导入导出的 license 边界 | `dsh-purge` 是**商业闭源**许可（禁止复制/修改/再分发），所以 zip 读写是自研的 `src/zip-lite.js`，未复制其任何代码 | 若日后要引入其实现，必须先取得授权 |
 | 8 | `dsh-mcp-manager` 是否删除 | 用户计划整合完成后移除，当前仍在 profile 依赖里且被 `disabled: true` 停用 | 用户自行 `dsh plugin --profile desktop remove dsh-mcp-manager`；本插件的 MCP 能力**不依赖它** |
+| 14 | **上游已前进 11 个提交**（`upstream/main` 最新 `58e8e1e`，版本 3.8.1；我们停在 merge-base `ad04522` 之后的 `5dfb2b0`） | 未同步。关键能力：`f010392` 会话菜单走官方 `contextMenus` API、`0d72015` 设置导航图标走官方 icon slot、`84cc522` 适配 DSH 0.2.2-rc.3、`cefd98f` 按「未分组 / 已删除工作区」过滤、`e514e51`+`a05ad7e` 冷标题改读官方 projection cache（新增 `src/projection-hints.js`） | 我们只打到 0.2.2-rc.1，且 `src/client/index.jsx` 几乎整文件重写；rebase 成本高、风险大。**先与用户确认是否要跟进 rc.3 适配**，再按 §12 的冲突热区表逐步重放 |
 
 ---
 
