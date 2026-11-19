@@ -210,14 +210,12 @@ body[data-ds-dark-theme] .archv{color-scheme:dark}
 .dsm-qa-rail .dsm-qa-sticky{margin:-10px -12px 0;padding:10px 12px 0}
 /* v3.13.0 胶囊联动：只有「跟随歌词胶囊」时面板本体才自己上材质——普通预设仍按
    v0.2.2 起的既有行为由宿主供背景，不吃 --dsmqa-bg，避免老用户升级后视觉突变。
-   wash（罩染）/ grain（颗粒）/ glow（外发光）三层都走变量：不跟随时 applyQaStyle
-   写 none / 0 / transparent，视觉与 v3.12.0 完全一致。 */
+   wash（罩染）与 grain（颗粒）都走 background-image 的两层：这两层随元素固定、
+   不跟着滚动内容跑（用绝对定位的伪元素做会随内容滚走，露出没材质的下半截）。
+   grain 的浓度是数字，直接当 alpha 用（rgb(255 255 255 / var(--dsmqa-grain))）。
+   不跟随时 applyQaStyle 把 wash 写 none、grain 写 0，视觉与 v3.12.0 完全一致。 */
 :root[data-dsmqa-follow="1"] .dsm-qa-main,
-:root[data-dsmqa-follow="1"] .dsm-qa-rail{position:relative;isolation:isolate;border-radius:var(--dsmqa-radius,14px);border:1px solid var(--dsmqa-border,transparent);background:var(--dsmqa-bg,transparent);backdrop-filter:blur(var(--dsmqa-blur,0px)) saturate(var(--dsmqa-sat,1));-webkit-backdrop-filter:blur(var(--dsmqa-blur,0px)) saturate(var(--dsmqa-sat,1));box-shadow:0 10px 30px var(--dsmqa-glow,transparent)}
-:root[data-dsmqa-follow="1"] .dsm-qa-main::before,
-:root[data-dsmqa-follow="1"] .dsm-qa-rail::before{content:'';position:absolute;inset:0;z-index:-1;border-radius:inherit;pointer-events:none;background-image:var(--dsmqa-wash,none)}
-:root[data-dsmqa-follow="1"] .dsm-qa-main::after,
-:root[data-dsmqa-follow="1"] .dsm-qa-rail::after{content:'';position:absolute;inset:0;z-index:-1;border-radius:inherit;pointer-events:none;opacity:var(--dsmqa-grain,0);background-image:repeating-radial-gradient(circle at 0 0,rgba(255,255,255,.10) 0 .5px,transparent .5px 2.5px)}
+:root[data-dsmqa-follow="1"] .dsm-qa-rail{position:relative;border-radius:var(--dsmqa-radius,14px);border:1px solid var(--dsmqa-border,transparent);background-color:var(--dsmqa-bg,transparent);background-image:repeating-radial-gradient(circle at 0 0,rgb(255 255 255 / calc(var(--dsmqa-grain,0) * .34)) 0 .5px,transparent .5px 2.5px),var(--dsmqa-wash,none);backdrop-filter:blur(var(--dsmqa-blur,0px)) saturate(var(--dsmqa-sat,1));-webkit-backdrop-filter:blur(var(--dsmqa-blur,0px)) saturate(var(--dsmqa-sat,1));box-shadow:0 10px 30px var(--dsmqa-glow,transparent)}
 :root[data-dsmqa-follow="1"] .dsm-qa-sticky{background:var(--dsmqa-solid,var(--dsmqa-head-bg,#18181A))}
 /* v0.5.4 分组可收起（替代「按上限截断」）：表头即开关，收起后只留标题与计数。 */
 .dsm-qa-fold{width:100%;box-sizing:border-box;background:0 0;border:0;padding:2px 0;color:inherit;font:inherit;cursor:pointer;text-align:left}
