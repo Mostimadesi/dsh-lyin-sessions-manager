@@ -282,8 +282,8 @@ git stash push -u -q && npm test ; git stash pop   # 在 pristine 状态跑一�
 
 ### 7.3 最近一次全绿记录
 
-- build stamp `3.13.0+2d264630`（v3.13.0 胶囊联动）
-- **537 项 / 532–533 通过 / 4–5 失败**（失败集都在 §7.2 那 5 项 Windows 基线里，按测试名对照）——**无新增回归**
+- build stamp `3.13.0+0d602cf2`（v3.13.0 胶囊联动，含 `7ce03e9` 的材质层修正）
+- **537 项 / 533–534 通过 / 3–4 失败**（失败集都在 §7.2 那 5 项 Windows 基线里，按测试名对照）——**无新增回归**
 - v3.13.0 新增单测：`tests/capsule-link.test.js` 17 项（7 种胶囊样式映射、数值夹逼、颜色校验、面板滑杆优先级、未移植样式的近似回落），全绿
 - 上一版记录：build stamp `3.12.0+ac22b075`（v3.12.0 工作区归档 + `check:schema`，含 `3084ab3` 的路由修复），**520 项 / 515–517 通过 / 3–5 失败**
 - 路由级新增 `tests/workspace-archive-routes.test.js` 3 项（提交 `3084ab3`）：空读→归档→幂等→恢复→清空、工作区列表带 `archived` 标记、损坏索引自愈。修掉两个真 bug：`changed` 曾把 store 的异构返回值（记录/布尔/计数）直接透给前端；`createWorkspaceArchiveStore` 曾不认 `DSH_SESSIONS_MANAGER_STAR_DIR`，导致测试写进用户真实状态目录。
@@ -359,7 +359,7 @@ localStorage（浏览器侧）：
 5. `max-height: 100%` 在百分比链断开时解析为 `none`（本机主面板紧邻父是 0 高 auto div）→ 必须用 `dsmFitPanel` 实测像素高度。
 6. `.dsm-qa-sticky` 用负外边距铺满容器内边距，**数值必须与容器 padding 一致**（main 18/22，rail 10/12），否则内容从空隙露出。
 7. 吸顶底色：`--dsmqa-head-bg`（运行时实测）> `--dsmqa-solid`（预设不透明兜底）> `#18181A`。
-   **v3.13.0 起要分两种情况**：普通预设下 `--dsmqa-bg/-radius/-blur/-border` 仍只被**已停用**的旧弹层消费（现役 main/rail 由宿主供背景）；只有 `preset === FOLLOW_PRESET` 时 `:root[data-dsmqa-follow="1"]` 那组规则才让面板自己上材质（bg + border + blur + saturate + wash/grain/glow 三层伪元素）。加新变量时记得同时登记到 `QA_STYLE_VAR_KEYS`，否则从跟随切回普通预设会把它留在 `:root` 上。
+   **v3.13.0 起要分两种情况**：普通预设下 `--dsmqa-bg/-radius/-blur/-border` 仍只被**已停用**的旧弹层消费（现役 main/rail 由宿主供背景）；只有 `preset === FOLLOW_PRESET` 时 `:root[data-dsmqa-follow="1"]` 那组规则才让面板自己上材质（bg + border + blur + saturate + glow，wash/grain 并进 `background-image` 两层）。加新变量时记得同时登记到 `QA_STYLE_VAR_KEYS`，否则从跟随切回普通预设会把它留在 `:root` 上。
 
 ### 工具 / 环境
 
@@ -406,6 +406,8 @@ localStorage（浏览器侧）：
 39. **面板自己的滑杆必须盖过胶囊快照**：`qaVarsFromCapsule(config, detail)` 的 `detail` 优先级高于 config。反过来做的话，用户在跟随模式下拖圆角滑杆毫无反应（每次重算都被胶囊值盖掉）。
 40. **跟随态要监听三个自定义事件 + `storage`**：`dsh-netease-lyrics-display` / `-notice` / `-colors`（同页写入走这些），加 `storage`（跨标签页写入只有它）。四个都在 `window` 上收；用同一个 `AbortController` 一次性摘除，并挂 `ctx.effect`，否则 HMR 后旧监听器活到页面关闭。
 41. **`FOLLOW_PRESET` 不是 `QA_STYLE_PRESETS` 的键**：`readQaStyle` 里那句 `QA_STYLE_PRESETS[raw.preset] ? raw.preset : 'dark-glass'` 会把跟随打回默认，必须显式 `raw.preset === FOLLOW_PRESET || ...` 放行。同类坑见经验卡 `插件-偏好select写入集合与读取白名单同一来源`。
+42. **材质层不能挂在滚动容器的绝对定位伪元素上**：`.dsm-qa-main` / `.dsm-qa-rail` 都是 `overflow-y:auto`。`::before { position:absolute; inset:0 }` 覆盖的是「内容盒」的高度，滚动后伪元素跟着内容走，下半截面板就变成裸背景；两个伪元素还会互相遮盖（`::after` 盖住 `::before`）。正确姿势是把 wash 与 grain 并进元素自己的 `background-image` 多层（grain 放最前、wash 在后），随元素固定、不随内容滚动，也不需要 `isolation`/`z-index`。
+43. **颗粒浓度当 alpha 用时先降权**：`--dsmqa-grain` 在 0–1，直接 `rgb(255 255 255 / var(--dsmqa-grain))` 在 0.5 时是半点阵、整块发白。用 `calc(var(--dsmqa-grain) * .34)` 压到纹理级别；同时点阵改用 `repeating-radial-gradient` 而非 `repeating-linear-gradient`，避免出摩尔纹。
 
 ---
 
@@ -495,7 +497,7 @@ npm run check:schema -- --local # 没有 upstream 分支时只看本地常量是
 4. 要改 UI 前，先确认改的是现役选择器（`.dsm-qa-main` / `.dsm-qa-rail`），别改已停用的 `.dsm-qa-panel`。
 5. 不要替用户做「拆三行 / 改名」这类产品决定；把方案摆出来让用户选。
 6. 每次提交都跑 `check:dist`，并且把 `lib/` 一起提交。
-7. 改 skill / MCP 子系统前先读 §10 的 17–30 条——那十四条全是评审与自审实测出来的真缺陷，且都有回归测试兜着，改的时候别把它们改回去。改工作区归档或 debug.log 前读 §10 的 31–36 条；改面板外观 / 胶囊联动前读 37–41 条。
+7. 改 skill / MCP 子系统前先读 §10 的 17–30 条——那十四条全是评审与自审实测出来的真缺陷，且都有回归测试兜着，改的时候别把它们改回去。改工作区归档或 debug.log 前读 §10 的 31–36 条；改面板外观 / 胶囊联动前读 37–43 条。
 8. `edit` 工具写 `src/client/index.jsx` 会产出 **CRLF**。改完用 `git diff --stat` 看行数，异常就用 node `.replace(/\r\n/g,'\n')` 归一化后再 `commit --amend`；长文件优先用 python/node 脚本改而不是 `edit`。
 
 ---
@@ -562,7 +564,7 @@ npm run check:schema -- --local # 没有 upstream 分支时只看本地常量是
 - 数据来源是三个 localStorage 键（`dsh.netease-lyrics.display.v1` 的 `capsuleStyle` / `panelOpacity`、`…notice.v1` 的 `glassGrain/glassTint/glassAccent/glassRing/ember*/akAccent`、`…colors.v1` 的 `active`），读法与事件名都逐字镜像对方源码；`readCapsuleSnapshot()` 任一键读失败都返回 `null` → 跟随态回落默认胶囊，**不能让面板因为隔壁插件数据坏掉而变白板**。
 - 面板外观下拉最前面加 `<option value={FOLLOW_PRESET}>跟随歌词胶囊（netease-lyrics）</option>`：`FOLLOW_PRESET = 'follow-capsule'` 不在 `QA_STYLE_PRESETS` 里，`readQaStyle` 要显式放行，否则刷新就被打回 `dark-glass`。跟随态下列表下方显示「当前胶囊：<中文名>」；`arknights` / `persona` 显示「本插件暂按 <近似> 近似，正式移植待后续」。
 - `applyQaStyle()` 改成两条路径：跟随态走 `qaVarsFromCapsule`，普通预设仍走 v0.2.2 的老逻辑。**变量清理表从「某一个预设的键」换成 `QA_STYLE_VAR_KEYS`**——跟随态会写 `--dsmqa-wash/-grain/-glow/-sat`，只清普通预设的键会把这些留在 `:root` 上，切回去后一直带罩染。
-- 面板本体上材质用属性开关：`applyQaStyle()` 写 `document.documentElement.dataset.dsmqaFollow = '1'`，CSS 里 `:root[data-dsmqa-follow="1"] .dsm-qa-main / .dsm-qa-rail` 才吃 `background / border / backdrop-filter / box-shadow`，`::before` 铺 wash、`::after` 铺 grain。**普通预设视觉与 v3.12.0 完全一致**（老用户升级不突变）。
+- 面板本体上材质用属性开关：`applyQaStyle()` 写 `document.documentElement.dataset.dsmqaFollow = '1'`，CSS 里 `:root[data-dsmqa-follow="1"] .dsm-qa-main / .dsm-qa-rail` 才吃 `background-color / background-image / border / backdrop-filter / box-shadow`。wash 与 grain 并进 `background-image` 两层（grain 在最前、`calc(var(--dsmqa-grain) * .34)` 降权），**不能用绝对定位伪元素**——两个形态都是 `overflow-y:auto`，`inset:0` 的伪元素会随内容滚走、下半截面板变裸背景，且两个伪元素互相遮盖（`7ce03e9` 修的）。**普通预设视觉与 v3.12.0 完全一致**（老用户升级不突变）。
 - 事件监听：`dsh-netease-lyrics-display` / `-notice` / `-colors` 三个 CustomEvent + `window` 的 `storage`，同一个 `AbortController` 挂在 `ctx.effect` 上；回调先判 `readQaStyle().preset !== FOLLOW_PRESET` 就早退，非联动用户零开销。
 - `tests/capsule-link.test.js` 17 项：三键三事件逐字镜像、7 样式映射齐全、`QA_STYLE_VAR_KEYS` 覆盖所有样式输出（防漏登记）、数值夹逼、颜色校验、面板滑杆优先级、`solid` 忽略胶囊 opacity 但仍认滑杆、`arknights` 用 `akAccent`、歌词高亮色成为面板强调色。
 
