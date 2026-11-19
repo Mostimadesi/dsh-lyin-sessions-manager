@@ -3,7 +3,7 @@
 > 写给「接手后续维护的新会话 / 新维护者」。目标是让你在不读 5000 行源码的前提下，
 > 20 分钟内能改一行、构建、验证、回滚。
 >
-> 最后更新：2026-11-19（v3.13.0：快捷面板外观可以「跟随歌词胶囊」——读 netease-lyrics 的 localStorage 与事件，把它的 7 种胶囊样式映射成本插件的 CSS 变量；v3.12.0 是 debug.log 轮转、已标记拆三小行、工作区筛选哨兵、工作区归档（只做可见性）、`check:schema` 上游格式哨兵，并手工卸载了 `dsh-mcp-manager`。能力范围 = v0.5.5 MCP 开关 + v0.6.1 skill 管理 + v0.6.2/v0.6.3 缺陷修复 + v3.12.0 工作区归档 + v3.13.0 胶囊联动）
+> 最后更新：2026-11-19（v3.13.1：修正胶囊材质的「应用范围」——吸顶条不再是实色深条、面板铺满整块可用区域而不是只包住内容、跟随态默认默认铺满宽度而非 760px 窄卡；v3.13.0 是快捷面板外观可以「跟随歌词胶囊」——读 netease-lyrics 的 localStorage 与事件，把它的 7 种胶囊样式映射成本插件的 CSS 变量；v3.12.0 是 debug.log 轮转、已标记拆三小行、工作区筛选哨兵、工作区归档（只做可见性）、`check:schema` 上游格式哨兵，并手工卸载了 `dsh-mcp-manager`。能力范围 = v0.5.5 MCP 开关 + v0.6.1 skill 管理 + v0.6.2/v0.6.3 缺陷修复 + v3.12.0 工作区归档 + v3.13.0/3.13.1 胶囊联动）
 
 ---
 
@@ -14,7 +14,7 @@
 | 本机仓库路径 | `D:\DeepSeek Harness\workspace\plugins_helper\session-manager-unified\dsh-lyin-sessions-manager` |
 | 分支 / 远程 | `main`；`origin` = https://github.com/Mostimadesi/dsh-lyin-sessions-manager（公开），`upstream` = TOBYCAI/dsh-sessions-manager |
 | 插件包名 | `dsh-lyin-sessions-manager`（**改包名要同时改** `build.mjs` 的 ModuleLoader banner） |
-| package 版本 | `3.13.0`（上游 3.7.10 → 3.8.0 面板能力 → 3.9.0 加 MCP 开关 → 3.10.0 加 skill 管理 → 3.10.1 维护栏分组 → 3.10.2 评审加固 → 3.10.3 全量自审修复 → 3.11.0 debug.log 轮转 + 已标记拆三行 + 工作区筛选哨兵 → 3.12.0 工作区归档 + `check:schema` → 3.13.0 面板外观跟随歌词胶囊） |
+| package 版本 | `3.13.1`（上游 3.7.10 → 3.8.0 面板能力 → 3.9.0 加 MCP 开关 → 3.10.0 加 skill 管理 → 3.10.1 维护栏分组 → 3.10.2 评审加固 → 3.10.3 全量自审修复 → 3.11.0 debug.log 轮转 + 已标记拆三行 + 工作区筛选哨兵 → 3.12.0 工作区归档 + `check:schema` → 3.13.0 面板外观跟随歌词胶囊 → 3.13.1 材质铺满面板 + 吸顶条去实色 + 默认铺满宽度） |
 | 目标宿主 | DSH **0.2.2-rc.1**（`D:\DeepSeek Harness`，nightly 通道） |
 | 构建 | `npm run build` → 产出 `lib/index.js` + `lib/client.js`（**产物要提交**） |
 | 测试 | `npm test`（= `node scripts/run-tests.mjs`，53 个测试文件 / 537 项，Windows 基线 5 项失败见 §7.2） |
@@ -282,9 +282,9 @@ git stash push -u -q && npm test ; git stash pop   # 在 pristine 状态跑一�
 
 ### 7.3 最近一次全绿记录
 
-- build stamp `3.13.0+0d602cf2`（v3.13.0 胶囊联动，含 `7ce03e9` 的材质层修正）
+- build stamp `3.13.1+593dbcb8`（v3.13.1 胶囊材质范围修正，含 `7ce03e9` 的材质层修正）
 - **537 项 / 533–534 通过 / 3–4 失败**（失败集都在 §7.2 那 5 项 Windows 基线里，按测试名对照）——**无新增回归**
-- v3.13.0 新增单测：`tests/capsule-link.test.js` 17 项（7 种胶囊样式映射、数值夹逼、颜色校验、面板滑杆优先级、未移植样式的近似回落），全绿
+- v3.13.0 新增单测：`tests/capsule-link.test.js` 17 项（7 种胶囊样式映射、数值夹逼、颜色校验、面板滑杆优先级、未移植样式的近似回落），全绿；v3.13.1 是纯 CSS/UI 调整，无新增用例
 - 上一版记录：build stamp `3.12.0+ac22b075`（v3.12.0 工作区归档 + `check:schema`，含 `3084ab3` 的路由修复），**520 项 / 515–517 通过 / 3–5 失败**
 - 路由级新增 `tests/workspace-archive-routes.test.js` 3 项（提交 `3084ab3`）：空读→归档→幂等→恢复→清空、工作区列表带 `archived` 标记、损坏索引自愈。修掉两个真 bug：`changed` 曾把 store 的异构返回值（记录/布尔/计数）直接透给前端；`createWorkspaceArchiveStore` 曾不认 `DSH_SESSIONS_MANAGER_STAR_DIR`，导致测试写进用户真实状态目录。
 - 再上一版：build stamp `3.11.0+6806b74d`（v3.11.0 debug.log 轮转 + 已标记拆三行 + 工作区筛选哨兵），**488 项 / 484 通过 / 4 失败**
@@ -293,7 +293,7 @@ git stash push -u -q && npm test ; git stash pop   # 在 pristine 状态跑一�
 - `check:dist` exit 0（记得先 commit）
 - `check:schema` exit 0（11 份索引与 `upstream/main` 一致，2 份 local-only）
 - skill + MCP 子系统单测 **56 项全绿**：`tests/skill-rows.test.js` 21 + `tests/zip-lite.test.js` 15 + `tests/skill-routes.test.js` 5 + `tests/mcp-rows.test.js` 13 + `tests/mcp-routes.test.js` 2
-- 真机：摘要条 / 筛选框 / 折叠徽标 / 可收起分组 / 吸顶 / MCP 4 行 生效；skill 三态待重启后验；工作区归档三处（维护栏按钮 / 侧栏整组折叠 / 面板列表过滤）待真机验；v3.13.0 胶囊联动待真机验（面板外观选「跟随歌词胶囊」后切歌词皮肤，看面板材质是否跟着变）
+- 真机：摘要条 / 筛选框 / 折叠徽标 / 可收起分组 / 吸顶 / MCP 4 行 生效；skill 三态待重启后验；工作区归档三处（维护栏按钮 / 侧栏整组折叠 / 面板列表过滤）待真机验；v3.13.0 胶囊联动已真机确认材质能跟随切换，v3.13.1 修正了三处应用范围（吸顶条实色 / 材质只包内容 / 760px 窄卡），待用户看过新版截图
 
 ---
 
@@ -359,7 +359,7 @@ localStorage（浏览器侧）：
 5. `max-height: 100%` 在百分比链断开时解析为 `none`（本机主面板紧邻父是 0 高 auto div）→ 必须用 `dsmFitPanel` 实测像素高度。
 6. `.dsm-qa-sticky` 用负外边距铺满容器内边距，**数值必须与容器 padding 一致**（main 18/22，rail 10/12），否则内容从空隙露出。
 7. 吸顶底色：`--dsmqa-head-bg`（运行时实测）> `--dsmqa-solid`（预设不透明兜底）> `#18181A`。
-   **v3.13.0 起要分两种情况**：普通预设下 `--dsmqa-bg/-radius/-blur/-border` 仍只被**已停用**的旧弹层消费（现役 main/rail 由宿主供背景）；只有 `preset === FOLLOW_PRESET` 时 `:root[data-dsmqa-follow="1"]` 那组规则才让面板自己上材质（bg + border + blur + saturate + glow，wash/grain 并进 `background-image` 两层）。加新变量时记得同时登记到 `QA_STYLE_VAR_KEYS`，否则从跟随切回普通预设会把它留在 `:root` 上。
+   **v3.13.0 起要分两种情况**：普通预设下 `--dsmqa-bg/-radius/-blur/-border` 仍只被**已停用**的旧弹层消费（现役 main/rail 由宿主供背景）；只有 `preset === FOLLOW_PRESET` 时 `:root[data-dsmqa-follow="1"]` 那组规则才让面板自己上材质（bg + border + blur + saturate + glow，wash/grain 并进 `background-image` 两层；v3.13.1 起 `min-height: var(--dsmqa-avail)` 铺满可用高度，吸顶条取 `color-mix(... 62%, transparent)` 的同色淡版）。加新变量时记得同时登记到 `QA_STYLE_VAR_KEYS`，否则从跟随切回普通预设会把它留在 `:root` 上。
 
 ### 工具 / 环境
 
@@ -408,6 +408,9 @@ localStorage（浏览器侧）：
 41. **`FOLLOW_PRESET` 不是 `QA_STYLE_PRESETS` 的键**：`readQaStyle` 里那句 `QA_STYLE_PRESETS[raw.preset] ? raw.preset : 'dark-glass'` 会把跟随打回默认，必须显式 `raw.preset === FOLLOW_PRESET || ...` 放行。同类坑见经验卡 `插件-偏好select写入集合与读取白名单同一来源`。
 42. **材质层不能挂在滚动容器的绝对定位伪元素上**：`.dsm-qa-main` / `.dsm-qa-rail` 都是 `overflow-y:auto`。`::before { position:absolute; inset:0 }` 覆盖的是「内容盒」的高度，滚动后伪元素跟着内容走，下半截面板就变成裸背景；两个伪元素还会互相遮盖（`::after` 盖住 `::before`）。正确姿势是把 wash 与 grain 并进元素自己的 `background-image` 多层（grain 放最前、wash 在后），随元素固定、不随内容滚动，也不需要 `isolation`/`z-index`。
 43. **颗粒浓度当 alpha 用时先降权**：`--dsmqa-grain` 在 0–1，直接 `rgb(255 255 255 / var(--dsmqa-grain))` 在 0.5 时是半点阵、整块发白。用 `calc(var(--dsmqa-grain) * .34)` 压到纹理级别；同时点阵改用 `repeating-radial-gradient` 而非 `repeating-linear-gradient`，避免出摩尔纹。
+44. **吸顶条不能用不透明的 `--dsmqa-solid`**：那在半透明材质顶上盖一条实色深条，与下方明显分层（用户看截图直接指出）。跟随态改成 `color-mix(in srgb, var(--dsmqa-bg) 62%, transparent)` + 同参数 `backdrop-filter`；**不要用全透明**：`backdrop-filter` 嵌套时未必生效，失效就成文字叠字。另外吸顶条要补 `border-radius: <半径> <半径> 0 0`，否则它铺满面板顶边时会切掉面板自己的圆角。
+45. **「铺满整块区域」要靠 `min-height` 而不是 `height`**：面板原先只包住内容高度，内容短时材质只覆盖上半截、下面露出宿主底色。`dsmFitPanel` 已经把可用高度算出来了，顺手写成 `--dsmqa-avail`；跟随态 `min-height: var(--dsmqa-avail, auto)` + `box-sizing: border-box`。用 `min-height` 而不用 `height`：内容比可用高度还长时仍由 `max-height` + `overflow` 接管，不会截断。
+46. **跟随态的默认宽度是「铺满」，不是预设的 760px**：`--dsmqa-width` 在普通预设里是 `max-width`，跟随态若不改写就会是宽屏居中的窄卡。`applyQaStyle` 里显式 `vars['--dsmqa-width'] = prefs.width != null ? prefs.width + 'px' : 'none'`；UI 上宽度滑杆在 `prefs.width == null` 时显示「铺满整区」并给一个「改回铺满整区」按钮，否则用户看到一个 760 的数字会以为那就是当前值。
 
 ---
 
@@ -418,7 +421,7 @@ localStorage（浏览器侧）：
 | 1 | 「收藏 / 待回看 / 优先级」在「已标记」区是否拆成三小行 | **v3.11.0 已拆**：用户拍板「可以拆成三小行」。`logic.markedRowsByKind` 按 star → review → priority 分通道（一个会话只归第一个命中类，`badges` 仍显示全部标记），折叠键是 `sec:marked:star` / `sec:marked:review` / `sec:marked:priority` | 已闭合；改口径先看 `tests/panel-sections.test.js` 的 4 项断言 |
 | 2 | 右栏（侧边栏）形态的滚动/高度是否真的生效 | **2026-11-18 已验证生效**：`panel:fit avail=738 anc=div.acoR2W_tabBody ch=744`，`panel:scroll 0:div.dsm-qa-rail oy=auto ch=351 sh=351`（rail 内容不溢出，故无需滚动）；主面板侧 `0:div.dsm-qa-main oy=auto ch=487 sh=487` 同样不溢出 | 若日后内容变多，复查 `ch > sh` 且 `oy` 可滚即可，无需再改代码 |
 | 3 | 工作区归档 / 可见性 | **v3.12.0 已移植**（用户选语义 A = 只做可见性）：`src/workspace-archive-core.js` 纯逻辑 + `src/workspace-archive.js` 文件 I/O + 路由 `/archived-sessions/workspace-archives` + 维护栏「工作区归档」sheet + 侧栏 `setGroupHidden` 整组折叠 + 面板 `visibleItemsAfterWorkspaceFold` 过滤。**不动会话归档状态**，所以「已归档」视图保持干净 | 已闭合；语义若要改成「同时归档会话」，改 host 路由的 archive 分支即可，UI 不用动 |
-| 4 | `window.__dshSessionsManager.version` | **v3.13.0 已同步**（现为 `3.13.0`） | 升 package 版本时要同步 5 处：`package.json`、`package-lock.json`（2 处）、`README.md` 的 badge、`src/client/index.jsx` 的 `version:` 字段 |
+| 4 | `window.__dshSessionsManager.version` | **v3.13.1 已同步**（现为 `3.13.1`） | 升 package 版本时要同步 5 处：`package.json`、`package-lock.json`（2 处）、`README.md` 的 badge、`src/client/index.jsx` 的 `version:` 字段 |
 | 5 | `dsmFitPanel` 无单测（依赖 DOM） | 靠日志验证 | 若要测，抽纯函数算 `avail` 再测 |
 | 6 | 上游若有新版格式（落盘 schema 漂移） | **v3.12.0 已加哨兵**：`npm run check:schema` 把 11 份落盘索引的 schemaVersion 钉成表，与 `upstream/main` 逐文件比对；`tests/check-schema.test.js` 3 项自检防止哨兵本身失效（常量改名、新增 store 忘了登记都会红） | 每次 rebase 前跑一次；上游改了版本号就按 §12 末尾的「schema 漂移处置」走 |
 | 7 | MCP 服务器开关（`/archived-sessions/mcp/*` + 维护栏 sheet） | 已实现并通过单测（`tests/mcp-rows.test.js` 13 项 + `tests/mcp-routes.test.js` 2 项） | 真机点一遍；确认重启后 MCP 连接按新开关状态建立 |
@@ -491,13 +494,13 @@ npm run check:schema -- --local # 没有 upstream 分支时只看本地常量是
 
 ## 13. 给接手会话的第一天
 
-1. 读本文件 + `git log --oneline -15`。最近一条应为 v3.13.0（面板外观跟随歌词胶囊）或其后；`main` 与 `origin/main` 一致。
+1. 读本文件 + `git log --oneline -15`。最近一条应为 v3.13.1（胶囊材质范围修正）或其后；`main` 与 `origin/main` 可能差若干条未推送提交，见 §14。
 2. `npm run build && npm test && npm run check:schema`，把失败数与 §7.2 的基线对齐（本机 4–5 项，按测试名对照）。若明显超出，先查是不是本机环境变了（`git stash -u` 对照 pristine 再 `git stash pop`）。
 3. 打开面板，看 `debug.log` 里 `session-list:store-ready` / `panel:fit` / `host-list:loaded` 三行是否正常。
 4. 要改 UI 前，先确认改的是现役选择器（`.dsm-qa-main` / `.dsm-qa-rail`），别改已停用的 `.dsm-qa-panel`。
 5. 不要替用户做「拆三行 / 改名」这类产品决定；把方案摆出来让用户选。
 6. 每次提交都跑 `check:dist`，并且把 `lib/` 一起提交。
-7. 改 skill / MCP 子系统前先读 §10 的 17–30 条——那十四条全是评审与自审实测出来的真缺陷，且都有回归测试兜着，改的时候别把它们改回去。改工作区归档或 debug.log 前读 §10 的 31–36 条；改面板外观 / 胶囊联动前读 37–43 条。
+7. 改 skill / MCP 子系统前先读 §10 的 17–30 条——那十四条全是评审与自审实测出来的真缺陷，且都有回归测试兜着，改的时候别把它们改回去。改工作区归档或 debug.log 前读 §10 的 31–36 条；改面板外观 / 胶囊联动前读 37–46 条。
 8. `edit` 工具写 `src/client/index.jsx` 会产出 **CRLF**。改完用 `git diff --stat` 看行数，异常就用 node `.replace(/\r\n/g,'\n')` 归一化后再 `commit --amend`；长文件优先用 python/node 脚本改而不是 `edit`。
 
 ---
@@ -521,9 +524,9 @@ npm run check:schema -- --local # 没有 upstream 分支时只看本地常量是
 - 不要在命令里回显 token；CC Safety Net 也会拦 `~/.git-credentials`、`~/.ssh` 的读取。
 - 推送体积：`git count-objects -vH` 约 5.6 MiB（`lib/` 已提交、`node_modules` 忽略），常见网络下 push 可能要 30s 以上，别用 30s 超时的前台命令。
 
-## 15. 最近几代改了什么（v0.6.1 → v3.13.0）
+## 15. 最近几代改了什么（v0.6.1 → v3.13.1）
 
-新会话不必回看 git log 的全部细节，这一节就是浓缩版；每条都能在 §10 找到对应的坑与纪律。最近新增的是 v3.11.0 / v3.12.0 / v3.13.0 三节。
+新会话不必回看 git log 的全部细节，这一节就是浓缩版；每条都能在 §10 找到对应的坑与纪律。最近新增的是 v3.11.0 / v3.12.0 / v3.13.0 / v3.13.1 四节。
 
 ### v0.6.1 — skill 管理（`1223c46`）
 - 新增 `src/skill-rows.js`（扫描宿主 skill 根、读/写 SKILL.md frontmatter、三态映射、导入导出、删除）与 `src/zip-lite.js`（零依赖 zip，只用 `node:zlib`）。
@@ -567,6 +570,13 @@ npm run check:schema -- --local # 没有 upstream 分支时只看本地常量是
 - 面板本体上材质用属性开关：`applyQaStyle()` 写 `document.documentElement.dataset.dsmqaFollow = '1'`，CSS 里 `:root[data-dsmqa-follow="1"] .dsm-qa-main / .dsm-qa-rail` 才吃 `background-color / background-image / border / backdrop-filter / box-shadow`。wash 与 grain 并进 `background-image` 两层（grain 在最前、`calc(var(--dsmqa-grain) * .34)` 降权），**不能用绝对定位伪元素**——两个形态都是 `overflow-y:auto`，`inset:0` 的伪元素会随内容滚走、下半截面板变裸背景，且两个伪元素互相遮盖（`7ce03e9` 修的）。**普通预设视觉与 v3.12.0 完全一致**（老用户升级不突变）。
 - 事件监听：`dsh-netease-lyrics-display` / `-notice` / `-colors` 三个 CustomEvent + `window` 的 `storage`，同一个 `AbortController` 挂在 `ctx.effect` 上；回调先判 `readQaStyle().preset !== FOLLOW_PRESET` 就早退，非联动用户零开销。
 - `tests/capsule-link.test.js` 17 项：三键三事件逐字镜像、7 样式映射齐全、`QA_STYLE_VAR_KEYS` 覆盖所有样式输出（防漏登记）、数值夹逼、颜色校验、面板滑杆优先级、`solid` 忽略胶囊 opacity 但仍认滑杆、`arknights` 用 `akAccent`、歌词高亮色成为面板强调色。
+
+### v3.13.1 — 胶囊材质只包住内容，用户看截图指出三处范围问题
+- 用户 m02223 发两张截图：主面板吸顶条是**不透明深色横条**、与下方半透明材质分层；右栏列表只到「待回看」就断，**下面一大片只露宿主底色**；主面板宽屏时仍是 **760px 居中窄卡**。
+- 三处分别对应：① `.dsm-qa-sticky` 在跟随态取了 `--dsmqa-solid`（不透明）；② 面板只包住内容高度（`panel:scroll` 日志实测内容 321px），材质只画在那块盒子上；③ `--dsmqa-width` 仍是预设的 760px，`margin:0 auto` 居中。
+- 修法：① 吸顶条改 `color-mix(in srgb, var(--dsmqa-bg) 62%, transparent)` + 同参数 `backdrop-filter`（**不用全透明**：`backdrop-filter` 嵌套时未必生效，失效就成文字叠字），并补 `border-radius: <半径> <半径> 0 0` 让顶边跟着面板圆角；② `dsmFitPanel` 把已算出的可用高度顺手写成 `--dsmqa-avail`，跟随态用 `min-height: var(--dsmqa-avail, auto)` + `box-sizing: border-box`（用 `min-height` 不用 `height`：内容超长时仍由 `max-height` + `overflow` 接管）；③ 跟随态默认 `vars['--dsmqa-width'] = prefs.width != null ? prefs.width + 'px' : 'none'`，只有用户显式拖过宽度滑杆才用那个值。
+- UI 配套：宽度滑杆在 `prefs.width == null` 时标签显示「铺满整区」（而不是一个会误导的 760 数字），并给一个「改回铺满整区」按钮把 `width` 重置回 `null`。
+- 新增 §10 第 44–46 条记录这三处。
 
 ---
 

@@ -215,8 +215,13 @@ body[data-ds-dark-theme] .archv{color-scheme:dark}
    grain 的浓度是数字，直接当 alpha 用（rgb(255 255 255 / var(--dsmqa-grain))）。
    不跟随时 applyQaStyle 把 wash 写 none、grain 写 0，视觉与 v3.12.0 完全一致。 */
 :root[data-dsmqa-follow="1"] .dsm-qa-main,
-:root[data-dsmqa-follow="1"] .dsm-qa-rail{position:relative;border-radius:var(--dsmqa-radius,14px);border:1px solid var(--dsmqa-border,transparent);background-color:var(--dsmqa-bg,transparent);background-image:repeating-radial-gradient(circle at 0 0,rgb(255 255 255 / calc(var(--dsmqa-grain,0) * .34)) 0 .5px,transparent .5px 2.5px),var(--dsmqa-wash,none);backdrop-filter:blur(var(--dsmqa-blur,0px)) saturate(var(--dsmqa-sat,1));-webkit-backdrop-filter:blur(var(--dsmqa-blur,0px)) saturate(var(--dsmqa-sat,1));box-shadow:0 10px 30px var(--dsmqa-glow,transparent)}
-:root[data-dsmqa-follow="1"] .dsm-qa-sticky{background:var(--dsmqa-solid,var(--dsmqa-head-bg,#18181A))}
+:root[data-dsmqa-follow="1"] .dsm-qa-rail{position:relative;box-sizing:border-box;min-height:var(--dsmqa-avail,auto);border-radius:var(--dsmqa-radius,14px);border:1px solid var(--dsmqa-border,transparent);background-color:var(--dsmqa-bg,transparent);background-image:repeating-radial-gradient(circle at 0 0,rgb(255 255 255 / calc(var(--dsmqa-grain,0) * .34)) 0 .5px,transparent .5px 2.5px),var(--dsmqa-wash,none);backdrop-filter:blur(var(--dsmqa-blur,0px)) saturate(var(--dsmqa-sat,1));-webkit-backdrop-filter:blur(var(--dsmqa-blur,0px)) saturate(var(--dsmqa-sat,1));box-shadow:0 10px 30px var(--dsmqa-glow,transparent)}
+/* v3.13.1 吸顶条不再用不透明 --dsmqa-solid：那会在半透明材质顶上盖一条实色深条，
+   与下方明显分层（用户实测反馈）。改成「同一色的淡版 + 同参数背景模糊」：色相与
+   面板一致，alpha 压到 62% 只够让滚过去的内容变浑浊，不会形成色块。
+   不用全透明是因为 backdrop-filter 嵌套时未必生效，万一失效会变成文字叠字。
+   --dsmqa-solid 仍留给普通预设（不跟随时那条规则不变）。 */
+:root[data-dsmqa-follow="1"] .dsm-qa-sticky{border-radius:var(--dsmqa-radius,14px) var(--dsmqa-radius,14px) 0 0;background:color-mix(in srgb,var(--dsmqa-bg,transparent) 62%,transparent);backdrop-filter:blur(var(--dsmqa-blur,0px)) saturate(var(--dsmqa-sat,1));-webkit-backdrop-filter:blur(var(--dsmqa-blur,0px)) saturate(var(--dsmqa-sat,1))}
 /* v0.5.4 分组可收起（替代「按上限截断」）：表头即开关，收起后只留标题与计数。 */
 .dsm-qa-fold{width:100%;box-sizing:border-box;background:0 0;border:0;padding:2px 0;color:inherit;font:inherit;cursor:pointer;text-align:left}
 .dsm-qa-fold:hover{opacity:.95}
@@ -739,6 +744,9 @@ function applyQaStyle() {
     // （detail 覆盖 capsule），否则用户在跟随下拖滑杆会没反应。
     const detail = { radius: prefs.radius, blur: prefs.blur, opacity: prefs.opacity, width: prefs.width }
     Object.assign(vars, qaVarsFromCapsule(readCapsuleSnapshot(), detail))
+    // v3.13.1：跟随态默认铺满整块区域（用户实测反馈「不该是 760px 居中的窄卡」）。
+    // 只有用户显式拖过宽度滑杆才用那个值——所以这里不是「胶囊给什么用什么」。
+    vars['--dsmqa-width'] = prefs.width != null ? prefs.width + 'px' : 'none'
   } else {
     const preset = QA_STYLE_PRESETS[prefs.preset] || QA_STYLE_PRESETS['dark-glass']
     Object.assign(vars, preset.vars)
@@ -831,6 +839,10 @@ function dsmFitPanel(el) {
       const offset = el.getBoundingClientRect().top - ar.top + anc.scrollTop
       avail = Math.max(200, Math.floor(anc.clientHeight - offset - 6))
       el.style.maxHeight = avail + 'px'
+      // v3.13.1：同样把可用高度写成变量。跟随胶囊时面板要「铺满整块区域」而不是
+      // 只包住内容高度——否则内容短时材质只覆盖上半截，下面露出宿主底色（用户实测
+      // 反馈）。不跟随时没有规则消费这个变量，行为与 v3.12.0 完全一致。
+      el.style.setProperty('--dsmqa-avail', avail + 'px')
     }
     let cur = el.parentElement
     let bg = ''
@@ -2910,6 +2922,9 @@ function SessionPanel({ workspacesSvc }) {
             const curBlur = qaPrefs.blur != null ? qaPrefs.blur : presetNum('--dsmqa-blur', 14)
             const curOpacity = qaPrefs.opacity != null ? qaPrefs.opacity : presetAlpha()
             const curWidth = qaPrefs.width != null ? qaPrefs.width : presetNum('--dsmqa-width', 760)
+            // v3.13.1：跟随态默认铺满整块区域，宽度滑杆此时不代表生效值（生效的是
+            // `--dsmqa-width: none`）——直接写数字会让用户以为拖到 760 是当前值。
+            const widthFull = following && qaPrefs.width == null
             return (
               <div className="mv-sheet" aria-label="面板外观">
                 <div className="mv-sheet-head">
@@ -2943,8 +2958,11 @@ function SessionPanel({ workspacesSvc }) {
                   <input id="dsm-qa-opacity" type="range" min={0.3} max={1} step={0.02} value={curOpacity} onChange={(e) => setPref({ opacity: Number(e.target.value) })} />
                 </div>
                 <div className="mv-field">
-                  <label className="mv-field-label" htmlFor="dsm-qa-width">面板宽度（{curWidth}px）</label>
+                  <label className="mv-field-label" htmlFor="dsm-qa-width">面板宽度（{widthFull ? '铺满整区' : curWidth + 'px'}）</label>
                   <input id="dsm-qa-width" type="range" min={480} max={1200} step={20} value={curWidth} onChange={(e) => setPref({ width: Number(e.target.value) })} />
+                  {widthFull ? null : (
+                    <button type="button" className="archv-btn" style={{ marginTop: 8 }} onClick={() => setPref({ width: null })}>改回铺满整区</button>
+                  )}
                 </div>
                 <div className="mv-foot">
                   <button type="button" className="archv-btn" onClick={() => setPref({ preset: 'dark-glass', radius: null, blur: null, opacity: null, width: null })}>恢复默认</button>
@@ -6031,7 +6049,7 @@ export function apply(ctx) {
   // 同一能力也尝试注册为客户端 cordis 服务 'lyinSessions'（可用则用）。
   try {
     const api = {
-      version: '3.13.0',
+      version: '3.13.1',
       openSession(id) {
         const target = id === null || id === undefined ? '' : String(id)
         if (!target) return false
