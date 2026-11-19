@@ -3,7 +3,7 @@
 > 写给「接手后续维护的新会话 / 新维护者」。目标是让你在不读 5000 行源码的前提下，
 > 20 分钟内能改一行、构建、验证、回滚。
 >
-> 最后更新：2026-11-18（v3.12.0：debug.log 轮转、已标记拆三小行、工作区筛选哨兵、工作区归档（只做可见性）、`check:schema` 上游格式哨兵；同时手工卸载了 `dsh-mcp-manager`。能力范围 = v0.5.5 MCP 开关 + v0.6.1 skill 管理 + v0.6.2/v0.6.3 缺陷修复 + v3.12.0 工作区归档）
+> 最后更新：2026-11-19（v3.13.0：快捷面板外观可以「跟随歌词胶囊」——读 netease-lyrics 的 localStorage 与事件，把它的 7 种胶囊样式映射成本插件的 CSS 变量；v3.12.0 是 debug.log 轮转、已标记拆三小行、工作区筛选哨兵、工作区归档（只做可见性）、`check:schema` 上游格式哨兵，并手工卸载了 `dsh-mcp-manager`。能力范围 = v0.5.5 MCP 开关 + v0.6.1 skill 管理 + v0.6.2/v0.6.3 缺陷修复 + v3.12.0 工作区归档 + v3.13.0 胶囊联动）
 
 ---
 
@@ -14,10 +14,10 @@
 | 本机仓库路径 | `D:\DeepSeek Harness\workspace\plugins_helper\session-manager-unified\dsh-lyin-sessions-manager` |
 | 分支 / 远程 | `main`；`origin` = https://github.com/Mostimadesi/dsh-lyin-sessions-manager（公开），`upstream` = TOBYCAI/dsh-sessions-manager |
 | 插件包名 | `dsh-lyin-sessions-manager`（**改包名要同时改** `build.mjs` 的 ModuleLoader banner） |
-| package 版本 | `3.12.0`（上游 3.7.10 → 3.8.0 面板能力 → 3.9.0 加 MCP 开关 → 3.10.0 加 skill 管理 → 3.10.1 维护栏分组 → 3.10.2 评审加固 → 3.10.3 全量自审修复 → 3.11.0 debug.log 轮转 + 已标记拆三行 + 工作区筛选哨兵 → 3.12.0 工作区归档 + `check:schema`） |
+| package 版本 | `3.13.0`（上游 3.7.10 → 3.8.0 面板能力 → 3.9.0 加 MCP 开关 → 3.10.0 加 skill 管理 → 3.10.1 维护栏分组 → 3.10.2 评审加固 → 3.10.3 全量自审修复 → 3.11.0 debug.log 轮转 + 已标记拆三行 + 工作区筛选哨兵 → 3.12.0 工作区归档 + `check:schema` → 3.13.0 面板外观跟随歌词胶囊） |
 | 目标宿主 | DSH **0.2.2-rc.1**（`D:\DeepSeek Harness`，nightly 通道） |
 | 构建 | `npm run build` → 产出 `lib/index.js` + `lib/client.js`（**产物要提交**） |
-| 测试 | `npm test`（= `node scripts/run-tests.mjs`，52 个测试文件 / 520 项，Windows 基线 5 项失败见 §7.2） |
+| 测试 | `npm test`（= `node scripts/run-tests.mjs`，53 个测试文件 / 537 项，Windows 基线 5 项失败见 §7.2） |
 | 产物一致性 | `npm run check:dist`（**必须先 commit 再跑**，它用 `git diff --exit-code -- lib` 判定） |
 | 上游格式哨兵 | `npm run check:schema`（把每份落盘索引的 schemaVersion 钉成表，与 `upstream/main` 逐个比对） |
 | 生效方式 | 纯 `lib/client.js` 改动：**刷新浏览器页面**即可；`lib/index.js`（host）改动：重启 DSH |
@@ -66,6 +66,7 @@ src/
   debug-log.js          debug.log 轮转与上限（v3.11.0：4 MiB × 4 = 16 MiB 足迹）
   workspace-archive-core.js 工作区归档纯逻辑（无 node: 导入，客户端也打包它）
   workspace-archive.js  工作区归档的文件 I/O（workspace-archives.v1.json，tmp+rename 原子写）
+  client/capsule-link.js 胶囊联动的纯判定层（v3.13.0）：读 netease-lyrics 快照 → 12 个 --dsmqa-* 变量，无 DOM / 无 localStorage
   compat/persistence.js 存储格式世代适配
   zstd-frame.js         直接解码压缩日志帧（turn-kind 用）
 scripts/
@@ -74,7 +75,7 @@ scripts/
   rescue-smoke.mjs      复制真实 v4 日志到临时目录，跑 32 项破坏性矩阵
   check-schema.mjs      上游落盘 schema 哨兵（npm run check:schema，见 §12.1）
   check-session-health.mjs / check-upstream-contract.mjs / compat-runtime.mjs
-tests/                  52 个 *.test.js（node:test），全量 520 项
+tests/                  53 个 *.test.js（node:test），全量 537 项
 docs/
   v01-meta-spec.md      v0.1 元数据层规格
   v01-交付与验证报告.md   四层验证栈的记录
@@ -187,6 +188,10 @@ ctx.inject(['sidebarRightTabs'], (scope) => {
 | `dsmFitPanel(el)` | index.jsx | 实测可用高度写 `max-height`；实测宿主底色写 `--dsmqa-head-bg` |
 | `dsmProbeScroll(el)` | index.jsx | 落盘 7 层祖先的 `oy/ch/sh`（滚动排查） |
 | `dsmDebugLog(channel, msg)` | index.jsx | POST `/archived-sessions/debug-log` → `~/.dsh/sessions-manager/debug.log` |
+| `readCapsuleSnapshot()` | index.jsx | 读 netease-lyrics 的三个 localStorage 键成一个快照（缺失/坏 JSON → null） |
+| `normalizeCapsuleConfig(input)` | capsule-link.js | 三子对象 → 归一化配置（数值夹逼 + 颜色校验，任何输入都给可用默认值） |
+| `qaVarsFromCapsule(config, detail)` | capsule-link.js | 胶囊配置 + 面板滑杆 → 12 个 `--dsmqa-*` 变量（detail 覆盖胶囊） |
+| `capsuleFollowInfo(config)` | capsule-link.js | 当前胶囊样式的中文名 + 是否已正式移植 + 未移植时的近似回落 |
 
 `logic.js` 里的函数全是纯函数，改它们要同步 `tests/*.test.js`（尤其 `tests/panel-sections.test.js`、`tests/quick-access.test.js`、`tests/subagent-fold.test.js`）。
 
@@ -243,7 +248,7 @@ Select-String -Path "$env:USERPROFILE\.dsh\sessions-manager\debug.log" -Pattern 
 ### 7.1 命令
 
 ```bash
-npm test                         # 全量（52 文件，约 520 项）
+npm test                         # 全量（53 文件，约 537 项）
 node --test tests/xxx.test.js    # 单文件
 node scripts/compat-smoke.mjs 0.2.2-rc.1   # 真实 cordis 加载 41 条路由
 node scripts/rescue-smoke.mjs              # 破坏性矩阵（需真实 ~/.dsh/sessions）
@@ -277,17 +282,18 @@ git stash push -u -q && npm test ; git stash pop   # 在 pristine 状态跑一�
 
 ### 7.3 最近一次全绿记录
 
-- build stamp `3.12.0+ac22b075`（v3.12.0 工作区归档 + `check:schema`，含 `3084ab3` 的路由修复）
-- **520 项 / 515–517 通过 / 3–5 失败**（实测 2 次：3 失败与 5 失败各一次；失败集都落在 §7.2 那 5 项 Windows 基线里，按测试名对照）——**无新增回归**
+- build stamp `3.13.0+d68c5734`（v3.13.0 胶囊联动）
+- **537 项 / 532–533 通过 / 4–5 失败**（失败集都在 §7.2 那 5 项 Windows 基线里，按测试名对照）——**无新增回归**
+- v3.13.0 新增单测：`tests/capsule-link.test.js` 17 项（7 种胶囊样式映射、数值夹逼、颜色校验、面板滑杆优先级、未移植样式的近似回落），全绿
+- 上一版记录：build stamp `3.12.0+ac22b075`（v3.12.0 工作区归档 + `check:schema`，含 `3084ab3` 的路由修复），**520 项 / 515–517 通过 / 3–5 失败**
 - 路由级新增 `tests/workspace-archive-routes.test.js` 3 项（提交 `3084ab3`）：空读→归档→幂等→恢复→清空、工作区列表带 `archived` 标记、损坏索引自愈。修掉两个真 bug：`changed` 曾把 store 的异构返回值（记录/布尔/计数）直接透给前端；`createWorkspaceArchiveStore` 曾不认 `DSH_SESSIONS_MANAGER_STAR_DIR`，导致测试写进用户真实状态目录。
-- 上一版记录：build stamp `3.11.0+6806b74d`（v3.11.0 debug.log 轮转 + 已标记拆三行 + 工作区筛选哨兵），**488 项 / 484 通过 / 4 失败**
-- 再上一版：build stamp `3.10.3+5fc28754`（v0.6.3 全量自审），**468 项 / 463–464 通过 / 4–5 基线失败**
+- 再上一版：build stamp `3.11.0+6806b74d`（v3.11.0 debug.log 轮转 + 已标记拆三行 + 工作区筛选哨兵），**488 项 / 484 通过 / 4 失败**
+- 更早：build stamp `3.10.3+5fc28754`（v0.6.3 全量自审），**468 项 / 463–464 通过 / 4–5 基线失败**
 - **2026-11-18 接手复测**（pristine `5dfb2b0`，无源码改动）：`npm run build` 正常，`npm test` **469 项 / 465 通过 / 4 失败**，失败集恰为基线四项。
 - `check:dist` exit 0（记得先 commit）
 - `check:schema` exit 0（11 份索引与 `upstream/main` 一致，2 份 local-only）
 - skill + MCP 子系统单测 **56 项全绿**：`tests/skill-rows.test.js` 21 + `tests/zip-lite.test.js` 15 + `tests/skill-routes.test.js` 5 + `tests/mcp-rows.test.js` 13 + `tests/mcp-routes.test.js` 2
-- v3.12.0 新增单测：`tests/workspace-archive.test.js` 26 项、`tests/workspace-archive-routes.test.js` 3 项、`tests/debug-log.test.js` 12 项、`tests/check-schema.test.js` 3 项，全绿
-- 真机：摘要条 / 筛选框 / 折叠徽标 / 可收起分组 / 吸顶 / MCP 4 行 生效；skill 三态待重启后验；工作区归档三处（维护栏按钮 / 侧栏整组折叠 / 面板列表过滤）待真机验
+- 真机：摘要条 / 筛选框 / 折叠徽标 / 可收起分组 / 吸顶 / MCP 4 行 生效；skill 三态待重启后验；工作区归档三处（维护栏按钮 / 侧栏整组折叠 / 面板列表过滤）待真机验；v3.13.0 胶囊联动待真机验（面板外观选「跟随歌词胶囊」后切歌词皮肤，看面板材质是否跟着变）
 
 ---
 
@@ -352,7 +358,8 @@ localStorage（浏览器侧）：
 
 5. `max-height: 100%` 在百分比链断开时解析为 `none`（本机主面板紧邻父是 0 高 auto div）→ 必须用 `dsmFitPanel` 实测像素高度。
 6. `.dsm-qa-sticky` 用负外边距铺满容器内边距，**数值必须与容器 padding 一致**（main 18/22，rail 10/12），否则内容从空隙露出。
-7. 吸顶底色：`--dsmqa-head-bg`（运行时实测）> `--dsmqa-solid`（预设不透明兜底）> `#18181A`。旧的 `--dsmqa-bg/-radius/-blur/-border` 只被**已停用**的旧弹层消费，现役面板基本不读它们——改预设外观时别指望它们生效。
+7. 吸顶底色：`--dsmqa-head-bg`（运行时实测）> `--dsmqa-solid`（预设不透明兜底）> `#18181A`。
+   **v3.13.0 起要分两种情况**：普通预设下 `--dsmqa-bg/-radius/-blur/-border` 仍只被**已停用**的旧弹层消费（现役 main/rail 由宿主供背景）；只有 `preset === FOLLOW_PRESET` 时 `:root[data-dsmqa-follow="1"]` 那组规则才让面板自己上材质（bg + border + blur + saturate + wash/grain/glow 三层伪元素）。加新变量时记得同时登记到 `QA_STYLE_VAR_KEYS`，否则从跟随切回普通预设会把它留在 `:root` 上。
 
 ### 工具 / 环境
 
@@ -392,6 +399,14 @@ localStorage（浏览器侧）：
 35. **下拉显式点名已归档工作区时要放行**：`visibleItemsAfterWorkspaceFold` 的 `peekPath` 参数就是干这个的。不放行的话，用户在工作区下拉里选中一个已归档工作区，看到的是空列表——看着像数据丢了。同时下拉本身要标注「（已归档）」，让用户事先知道。
 36. **`workspaceKeyOf` 要保 UNC 前缀**：`\\server\share` 直接 `replace(/\/{2,}/g,'/')` 会折叠成 `\server\share`，两个不同的网络路径就成了同一个键。折叠前先记下 `startsWith('//')`，折叠后补回一个 `/`。
 
+### 胶囊联动（v3.13.0 踩出来的）
+
+37. **跨插件读 localStorage 一律当「可能没有」**：netease-lyrics 没装、没写过偏好、JSON 坏了、键改名了——四种都可能。`readCapsuleSnapshot()` 任一键读失败都返回 `null`，跟随态据此回落默认胶囊；**绝不能让面板因为隔壁插件的数据坏掉而变白板**。
+38. **清理变量要按「全集」清，不能按某一个预设的键清**：原先是 `Object.keys(QA_STYLE_PRESETS['dark-glass'].vars)`，跟随态写进去的 `--dsmqa-wash/-grain/-glow/-sat` 不在那张表里 → 从跟随切回普通预设后 wash/grain 还留在 `:root` 上，面板一直带罩染。改成遍历 `QA_STYLE_VAR_KEYS`。
+39. **面板自己的滑杆必须盖过胶囊快照**：`qaVarsFromCapsule(config, detail)` 的 `detail` 优先级高于 config。反过来做的话，用户在跟随模式下拖圆角滑杆毫无反应（每次重算都被胶囊值盖掉）。
+40. **跟随态要监听三个自定义事件 + `storage`**：`dsh-netease-lyrics-display` / `-notice` / `-colors`（同页写入走这些），加 `storage`（跨标签页写入只有它）。四个都在 `window` 上收；用同一个 `AbortController` 一次性摘除，并挂 `ctx.effect`，否则 HMR 后旧监听器活到页面关闭。
+41. **`FOLLOW_PRESET` 不是 `QA_STYLE_PRESETS` 的键**：`readQaStyle` 里那句 `QA_STYLE_PRESETS[raw.preset] ? raw.preset : 'dark-glass'` 会把跟随打回默认，必须显式 `raw.preset === FOLLOW_PRESET || ...` 放行。同类坑见经验卡 `插件-偏好select写入集合与读取白名单同一来源`。
+
 ---
 
 ## 11. 待办 / 开放问题
@@ -401,7 +416,7 @@ localStorage（浏览器侧）：
 | 1 | 「收藏 / 待回看 / 优先级」在「已标记」区是否拆成三小行 | **v3.11.0 已拆**：用户拍板「可以拆成三小行」。`logic.markedRowsByKind` 按 star → review → priority 分通道（一个会话只归第一个命中类，`badges` 仍显示全部标记），折叠键是 `sec:marked:star` / `sec:marked:review` / `sec:marked:priority` | 已闭合；改口径先看 `tests/panel-sections.test.js` 的 4 项断言 |
 | 2 | 右栏（侧边栏）形态的滚动/高度是否真的生效 | **2026-11-18 已验证生效**：`panel:fit avail=738 anc=div.acoR2W_tabBody ch=744`，`panel:scroll 0:div.dsm-qa-rail oy=auto ch=351 sh=351`（rail 内容不溢出，故无需滚动）；主面板侧 `0:div.dsm-qa-main oy=auto ch=487 sh=487` 同样不溢出 | 若日后内容变多，复查 `ch > sh` 且 `oy` 可滚即可，无需再改代码 |
 | 3 | 工作区归档 / 可见性 | **v3.12.0 已移植**（用户选语义 A = 只做可见性）：`src/workspace-archive-core.js` 纯逻辑 + `src/workspace-archive.js` 文件 I/O + 路由 `/archived-sessions/workspace-archives` + 维护栏「工作区归档」sheet + 侧栏 `setGroupHidden` 整组折叠 + 面板 `visibleItemsAfterWorkspaceFold` 过滤。**不动会话归档状态**，所以「已归档」视图保持干净 | 已闭合；语义若要改成「同时归档会话」，改 host 路由的 archive 分支即可，UI 不用动 |
-| 4 | `window.__dshSessionsManager.version` | **v3.12.0 已同步**（现为 `3.12.0`） | 升 package 版本时要同步 5 处：`package.json`、`package-lock.json`（2 处）、`README.md` 的 badge、`src/client/index.jsx` 的 `version:` 字段 |
+| 4 | `window.__dshSessionsManager.version` | **v3.13.0 已同步**（现为 `3.13.0`） | 升 package 版本时要同步 5 处：`package.json`、`package-lock.json`（2 处）、`README.md` 的 badge、`src/client/index.jsx` 的 `version:` 字段 |
 | 5 | `dsmFitPanel` 无单测（依赖 DOM） | 靠日志验证 | 若要测，抽纯函数算 `avail` 再测 |
 | 6 | 上游若有新版格式（落盘 schema 漂移） | **v3.12.0 已加哨兵**：`npm run check:schema` 把 11 份落盘索引的 schemaVersion 钉成表，与 `upstream/main` 逐文件比对；`tests/check-schema.test.js` 3 项自检防止哨兵本身失效（常量改名、新增 store 忘了登记都会红） | 每次 rebase 前跑一次；上游改了版本号就按 §12 末尾的「schema 漂移处置」走 |
 | 7 | MCP 服务器开关（`/archived-sessions/mcp/*` + 维护栏 sheet） | 已实现并通过单测（`tests/mcp-rows.test.js` 13 项 + `tests/mcp-routes.test.js` 2 项） | 真机点一遍；确认重启后 MCP 连接按新开关状态建立 |
@@ -412,6 +427,8 @@ localStorage（浏览器侧）：
 | 10 | skill 导入导出的 license 边界 | `dsh-purge` 是**商业闭源**许可（禁止复制/修改/再分发），所以 zip 读写是自研的 `src/zip-lite.js`，未复制其任何代码 | 若日后要引入其实现，必须先取得授权 |
 | 8 | `dsh-mcp-manager` 是否删除 | **2026-11-18 已手工卸载完成**（见 §16）：补丁 `insert` 块、`package.json` 依赖、`pnpm-lock.yaml` 三段、`node_modules` 目录、`node_modules/.modules.yaml` 的 hoistedLocations、`.dsh-market/state.json` 的 disabled 项全部清理 | 重启 DSH 后复查 `/dsh-market/installed` 的 `disabled` 不再含它 |
 | 14 | **上游已前进 11 个提交**（`upstream/main` 最新 `58e8e1e`，版本 3.8.1；我们停在 merge-base `ad04522` 之后的 `5dfb2b0`） | **2026-11-18 用户明确暂不升级 rc.3**。已吸收两项纯逻辑改动（v3.11.0）：`cefd98f` 的工作区筛选哨兵（`WS_UNGROUPED` / `WS_GONE` / `matchWorkspaceFilter`）与 `f010392` 的 `shouldHideEmptyGroup`（当前会话在组内时绝不整组隐藏）。其余暂不吸收：`f010392` 会话菜单走官方 `contextMenus`（依赖 0.2.2 的 portal 注册）、`0d72015` 设置图标 slot（本机 rc.1 无该现象）、`84cc522` rc.3 适配、`e514e51`+`a05ad7e` projection cache 读冷标题（宿主面具备，但改造面大、收益仅冷启动性能） | 若日后跟进 rc.3，再按 §12 的冲突热区表逐步重放；`src/projection-hints.js` 未移植 |
+
+| 15 | 胶囊联动里 `arknights`（方舟观测）/ `persona`（月相引路）两种样式 | **v3.13.0 只做了近似**：`arknights` → 扫描线 + 框角 + `akAccent`；`persona` → 右侧月相环 + 蓝光。用户在 m01857 明确「先做 5 种常用映射，这两种以后再补」 | 正式移植要对齐 `dsh-netease-lyrics` 的 `clip-path` 切角（`polygon(10px 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%,0 10px)`）与 `persona` 的月相环渐变；改 `src/client/capsule-link.js` 的 `capsuleStyle()` 分支 + `CAPSULE_FOLLOW_READY` 即可，UI 会自动把「暂未移植」提示去掉 |
 
 ---
 
@@ -472,13 +489,13 @@ npm run check:schema -- --local # 没有 upstream 分支时只看本地常量是
 
 ## 13. 给接手会话的第一天
 
-1. 读本文件 + `git log --oneline -15`。最近一条应为 v3.12.0（工作区归档 + `check:schema`）或其后；`main` 与 `origin/main` 一致。
+1. 读本文件 + `git log --oneline -15`。最近一条应为 v3.13.0（面板外观跟随歌词胶囊）或其后；`main` 与 `origin/main` 一致。
 2. `npm run build && npm test && npm run check:schema`，把失败数与 §7.2 的基线对齐（本机 4–5 项，按测试名对照）。若明显超出，先查是不是本机环境变了（`git stash -u` 对照 pristine 再 `git stash pop`）。
 3. 打开面板，看 `debug.log` 里 `session-list:store-ready` / `panel:fit` / `host-list:loaded` 三行是否正常。
 4. 要改 UI 前，先确认改的是现役选择器（`.dsm-qa-main` / `.dsm-qa-rail`），别改已停用的 `.dsm-qa-panel`。
 5. 不要替用户做「拆三行 / 改名」这类产品决定；把方案摆出来让用户选。
 6. 每次提交都跑 `check:dist`，并且把 `lib/` 一起提交。
-7. 改 skill / MCP 子系统前先读 §10 的 17–30 条——那十四条全是评审与自审实测出来的真缺陷，且都有回归测试兜着，改的时候别把它们改回去。改工作区归档或 debug.log 前读 §10 的 31–36 条。
+7. 改 skill / MCP 子系统前先读 §10 的 17–30 条——那十四条全是评审与自审实测出来的真缺陷，且都有回归测试兜着，改的时候别把它们改回去。改工作区归档或 debug.log 前读 §10 的 31–36 条；改面板外观 / 胶囊联动前读 37–41 条。
 8. `edit` 工具写 `src/client/index.jsx` 会产出 **CRLF**。改完用 `git diff --stat` 看行数，异常就用 node `.replace(/\r\n/g,'\n')` 归一化后再 `commit --amend`；长文件优先用 python/node 脚本改而不是 `edit`。
 
 ---
@@ -502,9 +519,9 @@ npm run check:schema -- --local # 没有 upstream 分支时只看本地常量是
 - 不要在命令里回显 token；CC Safety Net 也会拦 `~/.git-credentials`、`~/.ssh` 的读取。
 - 推送体积：`git count-objects -vH` 约 5.6 MiB（`lib/` 已提交、`node_modules` 忽略），常见网络下 push 可能要 30s 以上，别用 30s 超时的前台命令。
 
-## 15. 最近几代改了什么（v0.6.1 → v3.12.0）
+## 15. 最近几代改了什么（v0.6.1 → v3.13.0）
 
-新会话不必回看 git log 的全部细节，这一节就是浓缩版；每条都能在 §10 找到对应的坑与纪律。v3.11.0 与 v3.12.0 两节是最近新增的。
+新会话不必回看 git log 的全部细节，这一节就是浓缩版；每条都能在 §10 找到对应的坑与纪律。最近新增的是 v3.11.0 / v3.12.0 / v3.13.0 三节。
 
 ### v0.6.1 — skill 管理（`1223c46`）
 - 新增 `src/skill-rows.js`（扫描宿主 skill 根、读/写 SKILL.md frontmatter、三态映射、导入导出、删除）与 `src/zip-lite.js`（零依赖 zip，只用 `node:zlib`）。
@@ -539,6 +556,15 @@ npm run check:schema -- --local # 没有 upstream 分支时只看本地常量是
 - 客户端：维护栏「工作区归档：N 个」按钮 + `mv-sheet` 弹层（逐工作区归档/恢复 + 全部恢复）；会话列表先过 `visibleItemsAfterWorkspaceFold`（`peekPath` 例外：用户在下拉里显式点名已归档工作区时不折叠，否则选中后一片空白）；五个派生集合的数据源从 `sessions` 全改成 `visibleSessions`，保证计数、搜索、全选、批量操作与列表口径一致；侧栏 `dsmSyncEmptyGroups` 里按 `group.cwd` 的折叠键 `setGroupHidden(scope, true)` 整组藏。
 - 新增 `scripts/check-schema.mjs`（`npm run check:schema`）+ `tests/check-schema.test.js` 3 项自检，见 §12.1。
 - **路由级测试补上后抓到两个真 bug（`3084ab3`）**：① `/archived-sessions/workspace-archives` 的 `changed` 曾把 store 的异构返回值（`archive()` 返回记录、`unarchive()` 返回布尔、`clear()` 返回计数）直接透给前端，前端 `if (r.changed)` 对记录对象恒真；改成「前后归档数量差」判布尔，`removed` 单独回计数。② `createWorkspaceArchiveStore` 曾不认 `DSH_SESSIONS_MANAGER_STAR_DIR`，测试写盘会落到用户真实的 `~/.dsh/sessions-manager/`；目录优先级补上这一级（与 `saved-filters.js` / `pending-moves.js` / `move-notices.js` 一致）。
+
+### v3.13.0 — 快捷面板外观「跟随歌词胶囊」（`dsh-netease-lyrics` 联动）
+- 新增 `src/client/capsule-link.js`（257 行，纯判定层，无 DOM / 无 localStorage，浏览器与 `node --test` 都能跑）：把 netease-lyrics 的 7 种胶囊样式（`default` / `frosted` / `wishes` / `ember` / `arknights` / `persona` / `solid`）映射成 12 个 `--dsmqa-*` 变量。核心是 `normalizeCapsuleConfig(input)`（数值夹逼 + 颜色校验，任何脏输入都算得出可用默认值）、`qaVarsFromCapsule(config, detail)`（`detail` 里的面板滑杆优先级**高于**胶囊快照）、`capsuleFollowInfo(config)`（中文名 + 是否已正式移植 + 未移植时的近似回落）。
+- 数据来源是三个 localStorage 键（`dsh.netease-lyrics.display.v1` 的 `capsuleStyle` / `panelOpacity`、`…notice.v1` 的 `glassGrain/glassTint/glassAccent/glassRing/ember*/akAccent`、`…colors.v1` 的 `active`），读法与事件名都逐字镜像对方源码；`readCapsuleSnapshot()` 任一键读失败都返回 `null` → 跟随态回落默认胶囊，**不能让面板因为隔壁插件数据坏掉而变白板**。
+- 面板外观下拉最前面加 `<option value={FOLLOW_PRESET}>跟随歌词胶囊（netease-lyrics）</option>`：`FOLLOW_PRESET = 'follow-capsule'` 不在 `QA_STYLE_PRESETS` 里，`readQaStyle` 要显式放行，否则刷新就被打回 `dark-glass`。跟随态下列表下方显示「当前胶囊：<中文名>」；`arknights` / `persona` 显示「本插件暂按 <近似> 近似，正式移植待后续」。
+- `applyQaStyle()` 改成两条路径：跟随态走 `qaVarsFromCapsule`，普通预设仍走 v0.2.2 的老逻辑。**变量清理表从「某一个预设的键」换成 `QA_STYLE_VAR_KEYS`**——跟随态会写 `--dsmqa-wash/-grain/-glow/-sat`，只清普通预设的键会把这些留在 `:root` 上，切回去后一直带罩染。
+- 面板本体上材质用属性开关：`applyQaStyle()` 写 `document.documentElement.dataset.dsmqaFollow = '1'`，CSS 里 `:root[data-dsmqa-follow="1"] .dsm-qa-main / .dsm-qa-rail` 才吃 `background / border / backdrop-filter / box-shadow`，`::before` 铺 wash、`::after` 铺 grain。**普通预设视觉与 v3.12.0 完全一致**（老用户升级不突变）。
+- 事件监听：`dsh-netease-lyrics-display` / `-notice` / `-colors` 三个 CustomEvent + `window` 的 `storage`，同一个 `AbortController` 挂在 `ctx.effect` 上；回调先判 `readQaStyle().preset !== FOLLOW_PRESET` 就早退，非联动用户零开销。
+- `tests/capsule-link.test.js` 17 项：三键三事件逐字镜像、7 样式映射齐全、`QA_STYLE_VAR_KEYS` 覆盖所有样式输出（防漏登记）、数值夹逼、颜色校验、面板滑杆优先级、`solid` 忽略胶囊 opacity 但仍认滑杆、`arknights` 用 `akAccent`、歌词高亮色成为面板强调色。
 
 ---
 

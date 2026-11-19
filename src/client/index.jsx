@@ -14,6 +14,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { aliveSessionCount, applyTagFilter, ascPriority, canDropOnWorkspace, collapsedVisibleTotal, countRenderedVisible, dotStateFor, dragAutoScrollStep, effectiveTitleOf, filterShapeFromSaved, filterSnapshotOf, foldActivityItems, foldBranches, foldOrphanSubagents, foldSubagentRows, foldSubagents, groupQuickAccess, isWorkspaceSentinel, markedRowsByKind, matchWorkspaceFilter, shouldHideEmptyGroup, WS_GONE, WS_UNGROUPED, mergeActivityItems, normalizeCollapsed, noticeToastPlan, QA_MARKED_KIND_HINT, QA_MARKED_KIND_LABEL, QA_MARKED_KINDS, QA_RECENT_WINDOW_MS, recentActiveRows, stateFromSessionStatus, summaryCounts, openSubagentToast, overflowPlan, pathTail, priorityOf, remainingRows, reviewOf, sessionForNodes, shortId, starredOf, tagDeleteConfirm, titleBackfillDecision, toastDurationFor, workspaceForNodes } from './logic.js'
 
 import { visibleItemsAfterWorkspaceFold, workspaceKeyOf } from '../workspace-archive-core.js'
+import { CAPSULE_COLOR_KEY, CAPSULE_DISPLAY_KEY, CAPSULE_EVENTS, CAPSULE_NOTICE_KEY, FOLLOW_PRESET, QA_STYLE_VAR_KEYS, capsuleFollowInfo, qaVarsFromCapsule } from './capsule-link.js'
 
 export const inject = ['slots']
 
@@ -207,6 +208,17 @@ body[data-ds-dark-theme] .archv{color-scheme:dark}
    宿主页面底色（--dsmqa-head-bg），测不到时退回当前外观预设的不透明色。 */
 .dsm-qa-sticky{position:sticky;top:0;z-index:3;background:var(--dsmqa-head-bg,var(--dsmqa-solid,#18181A));margin:-18px -22px 0;padding:18px 22px 0}
 .dsm-qa-rail .dsm-qa-sticky{margin:-10px -12px 0;padding:10px 12px 0}
+/* v3.13.0 胶囊联动：只有「跟随歌词胶囊」时面板本体才自己上材质——普通预设仍按
+   v0.2.2 起的既有行为由宿主供背景，不吃 --dsmqa-bg，避免老用户升级后视觉突变。
+   wash（罩染）/ grain（颗粒）/ glow（外发光）三层都走变量：不跟随时 applyQaStyle
+   写 none / 0 / transparent，视觉与 v3.12.0 完全一致。 */
+:root[data-dsmqa-follow="1"] .dsm-qa-main,
+:root[data-dsmqa-follow="1"] .dsm-qa-rail{position:relative;isolation:isolate;border-radius:var(--dsmqa-radius,14px);border:1px solid var(--dsmqa-border,transparent);background:var(--dsmqa-bg,transparent);backdrop-filter:blur(var(--dsmqa-blur,0px)) saturate(var(--dsmqa-sat,1));-webkit-backdrop-filter:blur(var(--dsmqa-blur,0px)) saturate(var(--dsmqa-sat,1));box-shadow:0 10px 30px var(--dsmqa-glow,transparent)}
+:root[data-dsmqa-follow="1"] .dsm-qa-main::before,
+:root[data-dsmqa-follow="1"] .dsm-qa-rail::before{content:'';position:absolute;inset:0;z-index:-1;border-radius:inherit;pointer-events:none;background-image:var(--dsmqa-wash,none)}
+:root[data-dsmqa-follow="1"] .dsm-qa-main::after,
+:root[data-dsmqa-follow="1"] .dsm-qa-rail::after{content:'';position:absolute;inset:0;z-index:-1;border-radius:inherit;pointer-events:none;opacity:var(--dsmqa-grain,0);background-image:repeating-radial-gradient(circle at 0 0,rgba(255,255,255,.10) 0 .5px,transparent .5px 2.5px)}
+:root[data-dsmqa-follow="1"] .dsm-qa-sticky{background:var(--dsmqa-solid,var(--dsmqa-head-bg,#18181A))}
 /* v0.5.4 分组可收起（替代「按上限截断」）：表头即开关，收起后只留标题与计数。 */
 .dsm-qa-fold{width:100%;box-sizing:border-box;background:0 0;border:0;padding:2px 0;color:inherit;font:inherit;cursor:pointer;text-align:left}
 .dsm-qa-fold:hover{opacity:.95}
@@ -675,7 +687,9 @@ function readQaStyle() {
   try {
     const raw = JSON.parse(localStorage.getItem(QA_STYLE_KEY) || '{}') || {}
     const out = {}
-    out.preset = QA_STYLE_PRESETS[raw.preset] ? raw.preset : 'dark-glass'
+    // v3.13.0：FOLLOW_PRESET（跟随歌词胶囊）不在 QA_STYLE_PRESETS 里，
+    // 要单独放行，否则用户选了跟随再刷新就被打回 dark-glass。
+    out.preset = raw.preset === FOLLOW_PRESET || QA_STYLE_PRESETS[raw.preset] ? raw.preset : 'dark-glass'
     // 细参数（合法域夹逼）：radius 0-24px / blur 0-28px / opacity 0.3-1（面板
     // 不透明度，作用于背景色 alpha 重写）/ width 480-1200px。
     out.radius = Number.isFinite(Number(raw.radius)) && raw.radius >= 0 && raw.radius <= 24 ? Number(raw.radius) : null
@@ -684,6 +698,26 @@ function readQaStyle() {
     out.width = Number.isFinite(Number(raw.width)) && raw.width >= 480 && raw.width <= 1200 ? Number(raw.width) : null
     return out
   } catch (e) { return { preset: 'dark-glass', radius: null, blur: null, opacity: null, width: null } }
+}
+
+// v3.13.0 胶囊联动：把 netease-lyrics 的三个 localStorage 键读成一份快照。
+// 读取失败（键不存在 / JSON 坏了 / 对方插件没装）一律返回 null——这时的行为是
+// 「跟随态回落 dark-glass」，不能让面板因为隔壁插件的数据坏掉而变白板。
+function readCapsuleSnapshot() {
+  if (typeof localStorage === 'undefined') return null
+  const parse = (key) => {
+    try {
+      const raw = localStorage.getItem(key)
+      if (!raw) return null
+      const obj = JSON.parse(raw)
+      return obj && typeof obj === 'object' ? obj : null
+    } catch (e) { return null }
+  }
+  const display = parse(CAPSULE_DISPLAY_KEY)
+  const notice = parse(CAPSULE_NOTICE_KEY)
+  const colors = parse(CAPSULE_COLOR_KEY)
+  if (!display && !notice && !colors) return null
+  return { display: display || {}, notice: notice || {}, colors: colors || {} }
 }
 
 function writeQaStyle(next) {
@@ -699,18 +733,35 @@ function writeQaStyle(next) {
 function applyQaStyle() {
   if (typeof document === 'undefined' || !document.documentElement) return
   const prefs = readQaStyle()
-  const preset = QA_STYLE_PRESETS[prefs.preset] || QA_STYLE_PRESETS['dark-glass']
-  const vars = { ...preset.vars }
-  if (prefs.radius != null) vars['--dsmqa-radius'] = prefs.radius + 'px'
-  if (prefs.blur != null) vars['--dsmqa-blur'] = prefs.blur + 'px'
-  if (prefs.width != null) vars['--dsmqa-width'] = prefs.width + 'px'
-  if (prefs.opacity != null) {
-    const m = /^rgba?\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)$/.exec(String(vars['--dsmqa-bg'] || ''))
-    if (m) vars['--dsmqa-bg'] = `rgba(${m[1]},${m[2]},${m[3]},${prefs.opacity})`
-  }
   const root = document.documentElement
-  for (const key of Object.keys(QA_STYLE_PRESETS['dark-glass'].vars)) root.style.removeProperty(key)
-  for (const [key, value] of Object.entries(vars)) root.style.setProperty(key, value)
+  const following = prefs.preset === FOLLOW_PRESET
+  const vars = { ...QA_STYLE_PRESETS['dark-glass'].vars }
+  if (following) {
+    // v3.13.0 跟随态：材质完全来自歌词胶囊快照；面板自己的四个滑杆仍优先
+    // （detail 覆盖 capsule），否则用户在跟随下拖滑杆会没反应。
+    const detail = { radius: prefs.radius, blur: prefs.blur, opacity: prefs.opacity, width: prefs.width }
+    Object.assign(vars, qaVarsFromCapsule(readCapsuleSnapshot(), detail))
+  } else {
+    const preset = QA_STYLE_PRESETS[prefs.preset] || QA_STYLE_PRESETS['dark-glass']
+    Object.assign(vars, preset.vars)
+    if (prefs.radius != null) vars['--dsmqa-radius'] = prefs.radius + 'px'
+    if (prefs.blur != null) vars['--dsmqa-blur'] = prefs.blur + 'px'
+    if (prefs.width != null) vars['--dsmqa-width'] = prefs.width + 'px'
+    if (prefs.opacity != null) {
+      const m = /^rgba?\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)$/.exec(String(vars['--dsmqa-bg'] || ''))
+      if (m) vars['--dsmqa-bg'] = `rgba(${m[1]},${m[2]},${m[3]},${prefs.opacity})`
+    }
+  }
+  // 清空走 QA_STYLE_VAR_KEYS 而不是某一个预设的键：跟随态会写 wash/grain/glow
+  // 这类普通预设没有的变量，只清普通预设的键会把这些留在 :root 上。
+  for (const key of QA_STYLE_VAR_KEYS) root.style.removeProperty(key)
+  for (const [key, value] of Object.entries(vars)) {
+    if (value == null || value === '') continue
+    root.style.setProperty(key, value)
+  }
+  // 面板本体是否自己上材质，由这个属性开关（见 CSS 里 :root[data-dsmqa-follow="1"]）。
+  if (following) root.setAttribute('data-dsmqa-follow', '1')
+  else root.removeAttribute('data-dsmqa-follow')
 }
 
 // v0.2.4 问题3修复：状态点颜色是**语义常量**（黄=进行中/琥珀=待处理/红=出错/
@@ -2841,7 +2892,14 @@ function SessionPanel({ workspacesSvc }) {
             void qaStyleTick // 依赖标记：tick 变化时本 IIFE 重渲染重读 localStorage
             const qaPrefs = readQaStyle()
             const setPref = (patch) => { writeQaStyle(patch); setQaStyleTick((n) => n + 1) }
-            const presetVars = QA_STYLE_PRESETS[qaPrefs.preset] || QA_STYLE_PRESETS['dark-glass']
+            // v3.13.0：跟随态下显示/滑杆读数要取胶囊算出来的值，否则「跟随 +
+            // 圆角滑杆」会显示成 dark-glass 的 14px，与实际生效值不符。
+            const following = qaPrefs.preset === FOLLOW_PRESET
+            const capsuleSnap = following ? readCapsuleSnapshot() : null
+            const capsuleInfo = following ? capsuleFollowInfo(capsuleSnap) : null
+            const presetVars = following
+              ? { label: '跟随歌词胶囊', vars: qaVarsFromCapsule(capsuleSnap, { radius: qaPrefs.radius, blur: qaPrefs.blur, opacity: qaPrefs.opacity, width: qaPrefs.width }) }
+              : (QA_STYLE_PRESETS[qaPrefs.preset] || QA_STYLE_PRESETS['dark-glass'])
             const presetNum = (name, fallback) => {
               const m = /(-?[\d.]+)(px)?$/.exec(String(presetVars.vars[name] || ''))
               return m ? Number(m[1]) : fallback
@@ -2863,11 +2921,17 @@ function SessionPanel({ workspacesSvc }) {
                 <div className="mv-field">
                   <label className="mv-field-label" htmlFor="dsm-qa-preset">主题预设</label>
                   <select id="dsm-qa-preset" value={qaPrefs.preset} onChange={(e) => setPref({ preset: e.target.value })}>
+                    <option value={FOLLOW_PRESET}>跟随歌词胶囊（netease-lyrics）</option>
                     {Object.entries(QA_STYLE_PRESETS).map(([key, p]) => (
                       <option key={key} value={key}>{p.label}</option>
                     ))}
                   </select>
                 </div>
+                {following ? (
+                  <div className="dtl-note">{capsuleSnap
+                    ? `当前胶囊：${capsuleInfo.label}${capsuleInfo.ready ? '' : '（本插件暂按 ' + capsuleInfo.fallback + ' 近似，正式移植待后续）'}`
+                    : '没读到歌词插件的胶囊设置：要么没装 netease-lyrics，要么它还没写过偏好。此时按 shadcn 暗色玻璃（默认胶囊）走。'}</div>
+                ) : null}
                 <div className="mv-field">
                   <label className="mv-field-label" htmlFor="dsm-qa-radius">圆角（{curRadius}px）</label>
                   <input id="dsm-qa-radius" type="range" min={0} max={24} step={1} value={curRadius} onChange={(e) => setPref({ radius: Number(e.target.value) })} />
@@ -5890,6 +5954,21 @@ export function apply(ctx) {
   } catch (e) { /* 注入失败时退化为面板内联样式 */ }
   // v0.2.2：快捷面板外观（预设 + 可调参数）尽早应用，避免首帧闪默认样式。
   applyQaStyle()
+  // v3.13.0 胶囊联动：歌词插件换皮肤 / 调材质 / 换高亮色时都会在当前 document
+  // 上派发各自的 CustomEvent（见 dsh-netease-lyrics 的 writeDisplay /
+  // writeNoticePrefs / writeColors），另加 window 的 storage 兜底（跨标签页
+  // 写入时只有 storage 事件）。只有「跟随」态需要重算，普通预设直接跳过，
+  // 不给非联动用户增加任何开销。
+  const capsuleAc = typeof AbortController !== 'undefined' ? new AbortController() : null
+  if (capsuleAc && typeof window !== 'undefined' && window.addEventListener) {
+    const onCapsuleChange = () => {
+      try { if (readQaStyle().preset !== FOLLOW_PRESET) return } catch (e) { return }
+      applyQaStyle()
+    }
+    for (const name of CAPSULE_EVENTS) window.addEventListener(name, onCapsuleChange, { signal: capsuleAc.signal })
+    window.addEventListener('storage', onCapsuleChange, { signal: capsuleAc.signal })
+    ctx.effect(() => () => capsuleAc.abort())
+  }
   dsmLoadCapabilities()
   // 活跃会话心跳：页面隐藏时不发（用户没在看；host 侧 TTL 到期后自然失效，
   // 于是「无法证明活跃」→ 放行移动，不会把会话永久锁死）。
@@ -5954,7 +6033,7 @@ export function apply(ctx) {
   // 同一能力也尝试注册为客户端 cordis 服务 'lyinSessions'（可用则用）。
   try {
     const api = {
-      version: '3.12.0',
+      version: '3.13.0',
       openSession(id) {
         const target = id === null || id === undefined ? '' : String(id)
         if (!target) return false
