@@ -206,8 +206,11 @@ body[data-ds-dark-theme] .archv{color-scheme:dark}
 /* v0.5.4 吸顶标题条：标题 + 摘要条固定在滚动容器顶部。负外边距让吸顶条铺满面板
    内边距——否则内容会从两侧和上方的空隙里露出来。底色优先用 dsmFitPanel 实测到的
    宿主页面底色（--dsmqa-head-bg），测不到时退回当前外观预设的不透明色。 */
-.dsm-qa-sticky{position:sticky;top:0;z-index:3;background:var(--dsmqa-head-bg,var(--dsmqa-solid,#18181A));margin:-18px -22px 0;padding:18px 22px 0}
-.dsm-qa-rail .dsm-qa-sticky{margin:-10px -12px 0;padding:10px 12px 0}
+.dsm-qa-sticky{position:sticky;top:0;z-index:3;background:var(--dsmqa-head-bg,var(--dsmqa-solid,#18181A));margin:-18px -22px 0;padding:18px 22px 12px}
+.dsm-qa-rail .dsm-qa-sticky{margin:-10px -12px 0;padding:10px 12px 10px}
+/* v3.13.2 搜索框搬进吸顶条后自己不再留底边距，改用吸顶条的 padding-bottom 收口，
+   否则那 12px 落在吸顶条外面，滚动时内容会从缝里露出来。 */
+.dsm-qa-sticky .dsm-qa-search{margin-bottom:0}
 /* v3.13.0 胶囊联动：只有「跟随歌词胶囊」时面板本体才自己上材质——普通预设仍按
    v0.2.2 起的既有行为由宿主供背景，不吃 --dsmqa-bg，避免老用户升级后视觉突变。
    wash（罩染）与 grain（颗粒）都走 background-image 的两层：这两层随元素固定、
@@ -215,7 +218,7 @@ body[data-ds-dark-theme] .archv{color-scheme:dark}
    grain 的浓度是数字，直接当 alpha 用（rgb(255 255 255 / var(--dsmqa-grain))）。
    不跟随时 applyQaStyle 把 wash 写 none、grain 写 0，视觉与 v3.12.0 完全一致。 */
 :root[data-dsmqa-follow="1"] .dsm-qa-main,
-:root[data-dsmqa-follow="1"] .dsm-qa-rail{position:relative;box-sizing:border-box;min-height:var(--dsmqa-avail,auto);border-radius:var(--dsmqa-radius,14px);border:1px solid var(--dsmqa-border,transparent);background-color:var(--dsmqa-bg,transparent);background-image:repeating-radial-gradient(circle at 0 0,rgb(255 255 255 / calc(var(--dsmqa-grain,0) * .34)) 0 .5px,transparent .5px 2.5px),var(--dsmqa-wash,none);backdrop-filter:blur(var(--dsmqa-blur,0px)) saturate(var(--dsmqa-sat,1));-webkit-backdrop-filter:blur(var(--dsmqa-blur,0px)) saturate(var(--dsmqa-sat,1));box-shadow:0 10px 30px var(--dsmqa-glow,transparent)}
+:root[data-dsmqa-follow="1"] .dsm-qa-rail{position:relative;box-sizing:border-box;margin-top:calc(-1 * var(--dsmqa-gap-top,0px));min-height:var(--dsmqa-avail,auto);border-radius:var(--dsmqa-radius,14px);border:1px solid var(--dsmqa-border,transparent);background-color:var(--dsmqa-bg,transparent);background-image:repeating-radial-gradient(circle at 0 0,rgb(255 255 255 / calc(var(--dsmqa-grain,0) * .34)) 0 .5px,transparent .5px 2.5px),var(--dsmqa-wash,none);backdrop-filter:blur(var(--dsmqa-blur,0px)) saturate(var(--dsmqa-sat,1));-webkit-backdrop-filter:blur(var(--dsmqa-blur,0px)) saturate(var(--dsmqa-sat,1));box-shadow:0 10px 30px var(--dsmqa-glow,transparent)}
 /* v3.13.1 吸顶条不再用不透明 --dsmqa-solid：那会在半透明材质顶上盖一条实色深条，
    与下方明显分层（用户实测反馈）。改成「同一色的淡版 + 同参数背景模糊」：色相与
    面板一致，alpha 压到 62% 只够让滚过去的内容变浑浊，不会形成色块。
@@ -837,12 +840,21 @@ function dsmFitPanel(el) {
     if (anc && anc !== document.body && anc !== document.documentElement) {
       const ar = anc.getBoundingClientRect()
       const offset = el.getBoundingClientRect().top - ar.top + anc.scrollTop
+      // v3.13.2：面板顶到容器顶这段视觉空隙（宿主的 tabBody 内边距，或面板上方那个
+      // 0 高兄弟节点带来的外边距）。跟随胶囊时面板是张材质卡片，这段空隙会让卡片和
+      // 上方导航之间露出一条宿主底色——用户实测反馈「距离侧边栏顶部导航还有一截距离」。
+      // 写成变量后由 CSS 用负 margin 吃掉；上限 40px，避免宿主布局异常时把面板拉飞。
+      const gapTop = Math.max(0, Math.min(40, Math.round(el.getBoundingClientRect().top - ar.top)))
+      const following = document.documentElement.getAttribute('data-dsmqa-follow') === '1'
       avail = Math.max(200, Math.floor(anc.clientHeight - offset - 6))
-      el.style.maxHeight = avail + 'px'
+      // 跟随态顶部被负 margin 抬高了 gapTop，高度要等量加回来，否则底边会空出同样一截。
+      const height = avail + (following ? gapTop : 0)
+      el.style.maxHeight = height + 'px'
       // v3.13.1：同样把可用高度写成变量。跟随胶囊时面板要「铺满整块区域」而不是
       // 只包住内容高度——否则内容短时材质只覆盖上半截，下面露出宿主底色（用户实测
       // 反馈）。不跟随时没有规则消费这个变量，行为与 v3.12.0 完全一致。
-      el.style.setProperty('--dsmqa-avail', avail + 'px')
+      el.style.setProperty('--dsmqa-avail', height + 'px')
+      el.style.setProperty('--dsmqa-gap-top', gapTop + 'px')
     }
     let cur = el.parentElement
     let bg = ''
@@ -855,7 +867,14 @@ function dsmFitPanel(el) {
     if (!dsmFitLogged) {
       dsmFitLogged = true
       const cls = anc ? String(anc.className || '').split(/\s+/).filter(Boolean).slice(0, 2).join('.') : ''
-      dsmDebugLog('panel:fit', `avail=${avail} anc=${anc ? anc.tagName.toLowerCase() : '-'}${cls ? '.' + cls : ''} ch=${anc ? anc.clientHeight : 0} head-bg=${bg || '(none)'}`)
+      // v3.13.2：把几何写全，便于判断「顶部那截空隙」究竟在面板外还是面板内——
+      // pt = 面板顶相对容器顶的距离（也就是我们无法用负 margin 吃掉的那段），
+      // st = 吸顶条自身高度，stTop = 吸顶条顶相对面板顶，sh = 面板内容高。
+      const ar = anc ? anc.getBoundingClientRect() : null
+      const pr = el.getBoundingClientRect()
+      const st = el.querySelector('.dsm-qa-sticky')
+      const stRect = st ? st.getBoundingClientRect() : null
+      dsmDebugLog('panel:fit', `avail=${avail} anc=${anc ? anc.tagName.toLowerCase() : '-'}${cls ? '.' + cls : ''} ch=${anc ? anc.clientHeight : 0} head-bg=${bg || '(none)'} pt=${ar ? Math.round(pr.top - ar.top) : '?'} st=${stRect ? Math.round(stRect.height) : 0} stTop=${stRect && ar ? Math.round(stRect.top - pr.top) : '?'} sh=${el.scrollHeight} chh=${el.clientHeight} stv=${el.scrollTop}`)
     }
   } catch (e) { /* best-effort */ }
 }
@@ -1054,7 +1073,9 @@ function DsmQuickAccessPanel({ compact = false } = {}) {
         ))}
         <span className="dsm-qa-sum-i dsm-qa-sum-all">共 {dsmMetaCache.size} 个会话</span>
       </div>
-      </div>
+      {/* v3.13.2 筛选框移进吸顶条内部：原先它是吸顶条后面的兄弟节点，面板一滚动就
+          从下面滑过去、被吸顶条盖掉（用户实测反馈「吸顶条会挡住搜索栏位」）。放进
+          吸顶条后它随吸顶条一起固定，永远可点。 */}
       <input
         className="dsm-qa-search"
         type="text"
@@ -1063,6 +1084,7 @@ function DsmQuickAccessPanel({ compact = false } = {}) {
         aria-label="筛选进行中的会话"
         onChange={(e) => setQuery(e.target.value)}
       />
+      </div>
       {jumpErr && <div className="dtl-note dsm-qa-err">{jumpErr}</div>}
       {!hasAny && (
         <div className="dtl-note">
@@ -6049,7 +6071,7 @@ export function apply(ctx) {
   // 同一能力也尝试注册为客户端 cordis 服务 'lyinSessions'（可用则用）。
   try {
     const api = {
-      version: '3.13.1',
+      version: '3.13.2',
       openSession(id) {
         const target = id === null || id === undefined ? '' : String(id)
         if (!target) return false

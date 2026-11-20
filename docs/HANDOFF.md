@@ -3,7 +3,7 @@
 > 写给「接手后续维护的新会话 / 新维护者」。目标是让你在不读 5000 行源码的前提下，
 > 20 分钟内能改一行、构建、验证、回滚。
 >
-> 最后更新：2026-11-19（v3.13.1：修正胶囊材质的「应用范围」——吸顶条不再是实色深条、面板铺满整块可用区域而不是只包住内容、跟随态默认默认铺满宽度而非 760px 窄卡；v3.13.0 是快捷面板外观可以「跟随歌词胶囊」——读 netease-lyrics 的 localStorage 与事件，把它的 7 种胶囊样式映射成本插件的 CSS 变量；v3.12.0 是 debug.log 轮转、已标记拆三小行、工作区筛选哨兵、工作区归档（只做可见性）、`check:schema` 上游格式哨兵，并手工卸载了 `dsh-mcp-manager`。能力范围 = v0.5.5 MCP 开关 + v0.6.1 skill 管理 + v0.6.2/v0.6.3 缺陷修复 + v3.12.0 工作区归档 + v3.13.0/3.13.1 胶囊联动）
+> 最后更新：2026-11-20（v3.13.2：筛选框搬进吸顶条内部一起吸顶、顶部那截空隙用 `--dsmqa-gap-top` 负 margin 吃掉（顺带增强 `panel:fit` 日志：`pt=/st=/stTop=/sh=/chh=/stv=`）；v3.13.1：修正胶囊材质的「应用范围」——吸顶条不再是实色深条、面板铺满整块可用区域而不是只包住内容、跟随态默认默认铺满宽度而非 760px 窄卡；v3.13.0 是快捷面板外观可以「跟随歌词胶囊」——读 netease-lyrics 的 localStorage 与事件，把它的 7 种胶囊样式映射成本插件的 CSS 变量；v3.12.0 是 debug.log 轮转、已标记拆三小行、工作区筛选哨兵、工作区归档（只做可见性）、`check:schema` 上游格式哨兵，并手工卸载了 `dsh-mcp-manager`。能力范围 = v0.5.5 MCP 开关 + v0.6.1 skill 管理 + v0.6.2/v0.6.3 缺陷修复 + v3.12.0 工作区归档 + v3.13.0/3.13.1/3.13.2 胶囊联动）
 
 ---
 
@@ -14,7 +14,7 @@
 | 本机仓库路径 | `D:\DeepSeek Harness\workspace\plugins_helper\session-manager-unified\dsh-lyin-sessions-manager` |
 | 分支 / 远程 | `main`；`origin` = https://github.com/Mostimadesi/dsh-lyin-sessions-manager（公开），`upstream` = TOBYCAI/dsh-sessions-manager |
 | 插件包名 | `dsh-lyin-sessions-manager`（**改包名要同时改** `build.mjs` 的 ModuleLoader banner） |
-| package 版本 | `3.13.1`（上游 3.7.10 → 3.8.0 面板能力 → 3.9.0 加 MCP 开关 → 3.10.0 加 skill 管理 → 3.10.1 维护栏分组 → 3.10.2 评审加固 → 3.10.3 全量自审修复 → 3.11.0 debug.log 轮转 + 已标记拆三行 + 工作区筛选哨兵 → 3.12.0 工作区归档 + `check:schema` → 3.13.0 面板外观跟随歌词胶囊 → 3.13.1 材质铺满面板 + 吸顶条去实色 + 默认铺满宽度） |
+| package 版本 | `3.13.2`（上游 3.7.10 → 3.8.0 面板能力 → 3.9.0 加 MCP 开关 → 3.10.0 加 skill 管理 → 3.10.1 维护栏分组 → 3.10.2 评审加固 → 3.10.3 全量自审修复 → 3.11.0 debug.log 轮转 + 已标记拆三行 + 工作区筛选哨兵 → 3.12.0 工作区归档 + `check:schema` → 3.13.0 面板外观跟随歌词胶囊 → 3.13.1 材质铺满面板 + 吸顶条去实色 + 默认铺满宽度 → 3.13.2 筛选框进吸顶条 + 顶部空隙用负 margin 吃掉） |
 | 目标宿主 | DSH **0.2.2-rc.1**（`D:\DeepSeek Harness`，nightly 通道） |
 | 构建 | `npm run build` → 产出 `lib/index.js` + `lib/client.js`（**产物要提交**） |
 | 测试 | `npm test`（= `node scripts/run-tests.mjs`，53 个测试文件 / 537 项，Windows 基线 5 项失败见 §7.2） |
@@ -282,9 +282,9 @@ git stash push -u -q && npm test ; git stash pop   # 在 pristine 状态跑一�
 
 ### 7.3 最近一次全绿记录
 
-- build stamp `3.13.1+593dbcb8`（v3.13.1 胶囊材质范围修正，含 `7ce03e9` 的材质层修正）
+- build stamp `3.13.2+1d75bd30`（v3.13.2 筛选框搬进吸顶条、顶部空隙用 `--dsmqa-gap-top` 负 margin 吃掉；v3.13.1 的材质范围修正见 `8fd002f`）
 - **537 项 / 533–534 通过 / 3–4 失败**（失败集都在 §7.2 那 5 项 Windows 基线里，按测试名对照）——**无新增回归**
-- v3.13.0 新增单测：`tests/capsule-link.test.js` 17 项（7 种胶囊样式映射、数值夹逼、颜色校验、面板滑杆优先级、未移植样式的近似回落），全绿；v3.13.1 是纯 CSS/UI 调整，无新增用例
+- v3.13.0 新增单测：`tests/capsule-link.test.js` 17 项（7 种胶囊样式映射、数值夹逼、颜色校验、面板滑杆优先级、未移植样式的近似回落），全绿；v3.13.1 / v3.13.2 都是纯 CSS/UI 调整，无新增用例
 - 上一版记录：build stamp `3.12.0+ac22b075`（v3.12.0 工作区归档 + `check:schema`，含 `3084ab3` 的路由修复），**520 项 / 515–517 通过 / 3–5 失败**
 - 路由级新增 `tests/workspace-archive-routes.test.js` 3 项（提交 `3084ab3`）：空读→归档→幂等→恢复→清空、工作区列表带 `archived` 标记、损坏索引自愈。修掉两个真 bug：`changed` 曾把 store 的异构返回值（记录/布尔/计数）直接透给前端；`createWorkspaceArchiveStore` 曾不认 `DSH_SESSIONS_MANAGER_STAR_DIR`，导致测试写进用户真实状态目录。
 - 再上一版：build stamp `3.11.0+6806b74d`（v3.11.0 debug.log 轮转 + 已标记拆三行 + 工作区筛选哨兵），**488 项 / 484 通过 / 4 失败**
@@ -293,7 +293,7 @@ git stash push -u -q && npm test ; git stash pop   # 在 pristine 状态跑一�
 - `check:dist` exit 0（记得先 commit）
 - `check:schema` exit 0（11 份索引与 `upstream/main` 一致，2 份 local-only）
 - skill + MCP 子系统单测 **56 项全绿**：`tests/skill-rows.test.js` 21 + `tests/zip-lite.test.js` 15 + `tests/skill-routes.test.js` 5 + `tests/mcp-rows.test.js` 13 + `tests/mcp-routes.test.js` 2
-- 真机：摘要条 / 筛选框 / 折叠徽标 / 可收起分组 / 吸顶 / MCP 4 行 生效；skill 三态待重启后验；工作区归档三处（维护栏按钮 / 侧栏整组折叠 / 面板列表过滤）待真机验；v3.13.0 胶囊联动已真机确认材质能跟随切换，v3.13.1 修正了三处应用范围（吸顶条实色 / 材质只包内容 / 760px 窄卡），待用户看过新版截图
+- 真机：摘要条 / 筛选框 / 折叠徽标 / 可收起分组 / 吸顶 / MCP 4 行 生效；skill 三态待重启后验；工作区归档三处（维护栏按钮 / 侧栏整组折叠 / 面板列表过滤）待真机验；v3.13.0 胶囊联动已真机确认材质能跟随切换，v3.13.1 修正了三处应用范围（吸顶条实色 / 材质只包内容 / 760px 窄卡）；v3.13.2 修筛选框被吸顶条盖掉、面板顶部留缝，待用户看过新版截图
 
 ---
 
@@ -359,7 +359,7 @@ localStorage（浏览器侧）：
 5. `max-height: 100%` 在百分比链断开时解析为 `none`（本机主面板紧邻父是 0 高 auto div）→ 必须用 `dsmFitPanel` 实测像素高度。
 6. `.dsm-qa-sticky` 用负外边距铺满容器内边距，**数值必须与容器 padding 一致**（main 18/22，rail 10/12），否则内容从空隙露出。
 7. 吸顶底色：`--dsmqa-head-bg`（运行时实测）> `--dsmqa-solid`（预设不透明兜底）> `#18181A`。
-   **v3.13.0 起要分两种情况**：普通预设下 `--dsmqa-bg/-radius/-blur/-border` 仍只被**已停用**的旧弹层消费（现役 main/rail 由宿主供背景）；只有 `preset === FOLLOW_PRESET` 时 `:root[data-dsmqa-follow="1"]` 那组规则才让面板自己上材质（bg + border + blur + saturate + glow，wash/grain 并进 `background-image` 两层；v3.13.1 起 `min-height: var(--dsmqa-avail)` 铺满可用高度，吸顶条取 `color-mix(... 62%, transparent)` 的同色淡版）。加新变量时记得同时登记到 `QA_STYLE_VAR_KEYS`，否则从跟随切回普通预设会把它留在 `:root` 上。
+   **v3.13.0 起要分两种情况**：普通预设下 `--dsmqa-bg/-radius/-blur/-border` 仍只被**已停用**的旧弹层消费（现役 main/rail 由宿主供背景）；只有 `preset === FOLLOW_PRESET` 时 `:root[data-dsmqa-follow="1"]` 那组规则才让面板自己上材质（bg + border + blur + saturate + glow，wash/grain 并进 `background-image` 两层；v3.13.1 起 `min-height: var(--dsmqa-avail)` 铺满可用高度，吸顶条取 `color-mix(... 62%, transparent)` 的同色淡版；v3.13.2 起再用 `margin-top: calc(-1 * var(--dsmqa-gap-top, 0px))` 吃掉面板顶到宿主容器顶的那截空隙，并把等量高度加回 `--dsmqa-avail`）。加新变量时记得同时登记到 `QA_STYLE_VAR_KEYS`，否则从跟随切回普通预设会把它留在 `:root` 上。
 
 ### 工具 / 环境
 
@@ -411,6 +411,9 @@ localStorage（浏览器侧）：
 44. **吸顶条不能用不透明的 `--dsmqa-solid`**：那在半透明材质顶上盖一条实色深条，与下方明显分层（用户看截图直接指出）。跟随态改成 `color-mix(in srgb, var(--dsmqa-bg) 62%, transparent)` + 同参数 `backdrop-filter`；**不要用全透明**：`backdrop-filter` 嵌套时未必生效，失效就成文字叠字。另外吸顶条要补 `border-radius: <半径> <半径> 0 0`，否则它铺满面板顶边时会切掉面板自己的圆角。
 45. **「铺满整块区域」要靠 `min-height` 而不是 `height`**：面板原先只包住内容高度，内容短时材质只覆盖上半截、下面露出宿主底色。`dsmFitPanel` 已经把可用高度算出来了，顺手写成 `--dsmqa-avail`；跟随态 `min-height: var(--dsmqa-avail, auto)` + `box-sizing: border-box`。用 `min-height` 而不用 `height`：内容比可用高度还长时仍由 `max-height` + `overflow` 接管，不会截断。
 46. **跟随态的默认宽度是「铺满」，不是预设的 760px**：`--dsmqa-width` 在普通预设里是 `max-width`，跟随态若不改写就会是宽屏居中的窄卡。`applyQaStyle` 里显式 `vars['--dsmqa-width'] = prefs.width != null ? prefs.width + 'px' : 'none'`；UI 上宽度滑杆在 `prefs.width == null` 时显示「铺满整区」并给一个「改回铺满整区」按钮，否则用户看到一个 760 的数字会以为那就是当前值。
+47. **别让筛选框当吸顶条的兄弟节点**：`position:sticky` 只固定自己那一块，兄弟节点照常滚。筛选框原本就在吸顶条后面，面板一滚动它就滑到吸顶条底下被盖掉（用户截图：「吸顶条会挡住搜索栏位」）。做法是把筛选框搬进 `.dsm-qa-sticky` **内部**，让它们一起吸顶；搬进去后要给吸顶条补 `padding-bottom` 收口，并给 `.dsm-qa-sticky .dsm-qa-search` 归零 `margin-bottom`，否则那截外边距落在吸顶条外面，滚动时内容会从缝里露出来。
+48. **「顶部那截空隙」量出来再用负 margin 吃掉，别写死数字**：面板顶到宿主容器顶的距离不是常数（视口高度、宿主 tabBody 的内边距都会变），`dsmFitPanel` 里 `el.getBoundingClientRect().top - anc.getBoundingClientRect().top` 就是它，写成 `--dsmqa-gap-top`（夹在 0–40px），跟随态用 `margin-top: calc(-1 * var(--dsmqa-gap-top,0px))`。**抬高多少，`max-height` 就要加回多少**，否则底边会空出同样一截。
+49. **吸顶条的 `top` 保持 0，别用负值**：`top:-18px` 这类写法的效果是「滚过 18px 之后吸顶条才真正贴住容器顶」，那 18px 里内容会从缝隙里露出来。要消掉容器内边距造成的空隙，用面板的负 `margin-top`（见第 48 条），不要动吸顶条的 `top`。
 
 ---
 
@@ -421,7 +424,7 @@ localStorage（浏览器侧）：
 | 1 | 「收藏 / 待回看 / 优先级」在「已标记」区是否拆成三小行 | **v3.11.0 已拆**：用户拍板「可以拆成三小行」。`logic.markedRowsByKind` 按 star → review → priority 分通道（一个会话只归第一个命中类，`badges` 仍显示全部标记），折叠键是 `sec:marked:star` / `sec:marked:review` / `sec:marked:priority` | 已闭合；改口径先看 `tests/panel-sections.test.js` 的 4 项断言 |
 | 2 | 右栏（侧边栏）形态的滚动/高度是否真的生效 | **2026-11-18 已验证生效**：`panel:fit avail=738 anc=div.acoR2W_tabBody ch=744`，`panel:scroll 0:div.dsm-qa-rail oy=auto ch=351 sh=351`（rail 内容不溢出，故无需滚动）；主面板侧 `0:div.dsm-qa-main oy=auto ch=487 sh=487` 同样不溢出 | 若日后内容变多，复查 `ch > sh` 且 `oy` 可滚即可，无需再改代码 |
 | 3 | 工作区归档 / 可见性 | **v3.12.0 已移植**（用户选语义 A = 只做可见性）：`src/workspace-archive-core.js` 纯逻辑 + `src/workspace-archive.js` 文件 I/O + 路由 `/archived-sessions/workspace-archives` + 维护栏「工作区归档」sheet + 侧栏 `setGroupHidden` 整组折叠 + 面板 `visibleItemsAfterWorkspaceFold` 过滤。**不动会话归档状态**，所以「已归档」视图保持干净 | 已闭合；语义若要改成「同时归档会话」，改 host 路由的 archive 分支即可，UI 不用动 |
-| 4 | `window.__dshSessionsManager.version` | **v3.13.1 已同步**（现为 `3.13.1`） | 升 package 版本时要同步 5 处：`package.json`、`package-lock.json`（2 处）、`README.md` 的 badge、`src/client/index.jsx` 的 `version:` 字段 |
+| 4 | `window.__dshSessionsManager.version` | **v3.13.2 已同步**（现为 `3.13.2`） | 升 package 版本时要同步 5 处：`package.json`、`package-lock.json`（2 处）、`README.md` 的 badge、`src/client/index.jsx` 的 `version:` 字段 |
 | 5 | `dsmFitPanel` 无单测（依赖 DOM） | 靠日志验证 | 若要测，抽纯函数算 `avail` 再测 |
 | 6 | 上游若有新版格式（落盘 schema 漂移） | **v3.12.0 已加哨兵**：`npm run check:schema` 把 11 份落盘索引的 schemaVersion 钉成表，与 `upstream/main` 逐文件比对；`tests/check-schema.test.js` 3 项自检防止哨兵本身失效（常量改名、新增 store 忘了登记都会红） | 每次 rebase 前跑一次；上游改了版本号就按 §12 末尾的「schema 漂移处置」走 |
 | 7 | MCP 服务器开关（`/archived-sessions/mcp/*` + 维护栏 sheet） | 已实现并通过单测（`tests/mcp-rows.test.js` 13 项 + `tests/mcp-routes.test.js` 2 项） | 真机点一遍；确认重启后 MCP 连接按新开关状态建立 |
@@ -494,13 +497,13 @@ npm run check:schema -- --local # 没有 upstream 分支时只看本地常量是
 
 ## 13. 给接手会话的第一天
 
-1. 读本文件 + `git log --oneline -15`。最近一条应为 v3.13.1（胶囊材质范围修正）或其后；`main` 与 `origin/main` 可能差若干条未推送提交，见 §14。
+1. 读本文件 + `git log --oneline -15`。最近一条应为 v3.13.2（筛选框进吸顶条 + 顶部空隙修正）或其后；`main` 与 `origin/main` 可能差若干条未推送提交，见 §14。
 2. `npm run build && npm test && npm run check:schema`，把失败数与 §7.2 的基线对齐（本机 4–5 项，按测试名对照）。若明显超出，先查是不是本机环境变了（`git stash -u` 对照 pristine 再 `git stash pop`）。
 3. 打开面板，看 `debug.log` 里 `session-list:store-ready` / `panel:fit` / `host-list:loaded` 三行是否正常。
 4. 要改 UI 前，先确认改的是现役选择器（`.dsm-qa-main` / `.dsm-qa-rail`），别改已停用的 `.dsm-qa-panel`。
 5. 不要替用户做「拆三行 / 改名」这类产品决定；把方案摆出来让用户选。
 6. 每次提交都跑 `check:dist`，并且把 `lib/` 一起提交。
-7. 改 skill / MCP 子系统前先读 §10 的 17–30 条——那十四条全是评审与自审实测出来的真缺陷，且都有回归测试兜着，改的时候别把它们改回去。改工作区归档或 debug.log 前读 §10 的 31–36 条；改面板外观 / 胶囊联动前读 37–46 条。
+7. 改 skill / MCP 子系统前先读 §10 的 17–30 条——那十四条全是评审与自审实测出来的真缺陷，且都有回归测试兜着，改的时候别把它们改回去。改工作区归档或 debug.log 前读 §10 的 31–36 条；改面板外观 / 胶囊联动前读 37–49 条。
 8. `edit` 工具写 `src/client/index.jsx` 会产出 **CRLF**。改完用 `git diff --stat` 看行数，异常就用 node `.replace(/\r\n/g,'\n')` 归一化后再 `commit --amend`；长文件优先用 python/node 脚本改而不是 `edit`。
 
 ---
@@ -524,9 +527,9 @@ npm run check:schema -- --local # 没有 upstream 分支时只看本地常量是
 - 不要在命令里回显 token；CC Safety Net 也会拦 `~/.git-credentials`、`~/.ssh` 的读取。
 - 推送体积：`git count-objects -vH` 约 5.6 MiB（`lib/` 已提交、`node_modules` 忽略），常见网络下 push 可能要 30s 以上，别用 30s 超时的前台命令。
 
-## 15. 最近几代改了什么（v0.6.1 → v3.13.1）
+## 15. 最近几代改了什么（v0.6.1 → v3.13.2）
 
-新会话不必回看 git log 的全部细节，这一节就是浓缩版；每条都能在 §10 找到对应的坑与纪律。最近新增的是 v3.11.0 / v3.12.0 / v3.13.0 / v3.13.1 四节。
+新会话不必回看 git log 的全部细节，这一节就是浓缩版；每条都能在 §10 找到对应的坑与纪律。最近新增的是 v3.11.0 / v3.12.0 / v3.13.0 / v3.13.1 / v3.13.2 五节。
 
 ### v0.6.1 — skill 管理（`1223c46`）
 - 新增 `src/skill-rows.js`（扫描宿主 skill 根、读/写 SKILL.md frontmatter、三态映射、导入导出、删除）与 `src/zip-lite.js`（零依赖 zip，只用 `node:zlib`）。
@@ -577,6 +580,18 @@ npm run check:schema -- --local # 没有 upstream 分支时只看本地常量是
 - 修法：① 吸顶条改 `color-mix(in srgb, var(--dsmqa-bg) 62%, transparent)` + 同参数 `backdrop-filter`（**不用全透明**：`backdrop-filter` 嵌套时未必生效，失效就成文字叠字），并补 `border-radius: <半径> <半径> 0 0` 让顶边跟着面板圆角；② `dsmFitPanel` 把已算出的可用高度顺手写成 `--dsmqa-avail`，跟随态用 `min-height: var(--dsmqa-avail, auto)` + `box-sizing: border-box`（用 `min-height` 不用 `height`：内容超长时仍由 `max-height` + `overflow` 接管）；③ 跟随态默认 `vars['--dsmqa-width'] = prefs.width != null ? prefs.width + 'px' : 'none'`，只有用户显式拖过宽度滑杆才用那个值。
 - UI 配套：宽度滑杆在 `prefs.width == null` 时标签显示「铺满整区」（而不是一个会误导的 760 数字），并给一个「改回铺满整区」按钮把 `width` 重置回 `null`。
 - 新增 §10 第 44–46 条记录这三处。
+
+---
+
+### v3.13.2 — 吸顶条挡住搜索框、面板顶部留缝
+
+- 用户 m02368 发右栏截图：吸顶条（深紫、含标题与四色统计）**压住筛选输入框的上半截**，只剩 placeholder 的下半行；同时吸顶条上沿与侧栏顶部导航之间还**留着一截宿主底色**。
+- 截图逐行采样（446×175）确认：顶部 16px 宿主底色 → 吸顶条到 y≈120 → y≈124 起就是被裁掉一半的搜索框。
+- 根因一：搜索框是吸顶条的**兄弟节点**，跟着正常文档流滚；面板一滚动它就滑到吸顶条底下。`position:sticky` 只固定自己那一块，不会替兄弟节点让位。
+- 根因二：面板顶到宿主容器顶的距离不是常数（视口高度、宿主 tabBody 内边距都会变），跟随态又没吃这截距离，于是材质卡片顶边下方露出宿主底色。
+- 修法：① 把 `<input className="dsm-qa-search">` 移进 `.dsm-qa-sticky` 内部一起吸顶；吸顶条 `padding` 尾值 `0` → `12px` 收口，并新增 `.dsm-qa-sticky .dsm-qa-search{margin-bottom:0}`；② `dsmFitPanel` 量出 `gapTop = clamp(el.top - anc.top, 0, 40)` 写成 `--dsmqa-gap-top`，跟随态 `margin-top:calc(-1 * var(--dsmqa-gap-top,0px))`，并把多吃的这截距离加回 `max-height` / `--dsmqa-avail`（不加回去底边会空出同样一截）；③ 吸顶条 `top` 保持 `0`，不写负值。
+- 顺带增强 `panel:fit` 日志：追加 `pt=`（面板顶到容器顶）、`st=`（吸顶条高度）、`stTop=`（吸顶条顶相对面板顶）、`sh=` / `chh=` / `stv=`，下次判断「空隙在面板外还是面板内」不用猜。
+- 新增 §10 第 47–49 条记录这三处。
 
 ---
 
