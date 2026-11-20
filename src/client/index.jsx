@@ -218,13 +218,13 @@ body[data-ds-dark-theme] .archv{color-scheme:dark}
    grain 的浓度是数字，直接当 alpha 用（rgb(255 255 255 / var(--dsmqa-grain))）。
    不跟随时 applyQaStyle 把 wash 写 none、grain 写 0，视觉与 v3.12.0 完全一致。 */
 :root[data-dsmqa-follow="1"] .dsm-qa-main,
-:root[data-dsmqa-follow="1"] .dsm-qa-rail{position:relative;box-sizing:border-box;margin-top:calc(-1 * var(--dsmqa-gap-top,0px));min-height:var(--dsmqa-avail,auto);border-radius:var(--dsmqa-radius,14px);border:1px solid var(--dsmqa-border,transparent);background-color:var(--dsmqa-bg,transparent);background-image:repeating-radial-gradient(circle at 0 0,rgb(255 255 255 / calc(var(--dsmqa-grain,0) * .34)) 0 .5px,transparent .5px 2.5px),var(--dsmqa-wash,none);backdrop-filter:blur(var(--dsmqa-blur,0px)) saturate(var(--dsmqa-sat,1));-webkit-backdrop-filter:blur(var(--dsmqa-blur,0px)) saturate(var(--dsmqa-sat,1));box-shadow:0 10px 30px var(--dsmqa-glow,transparent)}
+:root[data-dsmqa-follow="1"] .dsm-qa-rail{position:relative;box-sizing:border-box;margin-top:calc(-1 * var(--dsmqa-gap-top,0px));padding-top:0;min-height:var(--dsmqa-avail,auto);border-radius:var(--dsmqa-radius,14px);border:1px solid var(--dsmqa-border,transparent);background-color:var(--dsmqa-bg,transparent);background-image:repeating-radial-gradient(circle at 0 0,rgb(255 255 255 / calc(var(--dsmqa-grain,0) * .34)) 0 .5px,transparent .5px 2.5px),var(--dsmqa-wash,none);backdrop-filter:blur(var(--dsmqa-blur,0px)) saturate(var(--dsmqa-sat,1));-webkit-backdrop-filter:blur(var(--dsmqa-blur,0px)) saturate(var(--dsmqa-sat,1));box-shadow:0 10px 30px var(--dsmqa-glow,transparent)}
 /* v3.13.1 吸顶条不再用不透明 --dsmqa-solid：那会在半透明材质顶上盖一条实色深条，
    与下方明显分层（用户实测反馈）。改成「同一色的淡版 + 同参数背景模糊」：色相与
    面板一致，alpha 压到 62% 只够让滚过去的内容变浑浊，不会形成色块。
    不用全透明是因为 backdrop-filter 嵌套时未必生效，万一失效会变成文字叠字。
    --dsmqa-solid 仍留给普通预设（不跟随时那条规则不变）。 */
-:root[data-dsmqa-follow="1"] .dsm-qa-sticky{border-radius:var(--dsmqa-radius,14px) var(--dsmqa-radius,14px) 0 0;background:color-mix(in srgb,var(--dsmqa-bg,transparent) 62%,transparent);backdrop-filter:blur(var(--dsmqa-blur,0px)) saturate(var(--dsmqa-sat,1));-webkit-backdrop-filter:blur(var(--dsmqa-blur,0px)) saturate(var(--dsmqa-sat,1))}
+:root[data-dsmqa-follow="1"] .dsm-qa-sticky{margin-top:0;border-radius:var(--dsmqa-radius,14px) var(--dsmqa-radius,14px) 0 0;background:color-mix(in srgb,var(--dsmqa-bg,transparent) 62%,transparent);backdrop-filter:blur(var(--dsmqa-blur,0px)) saturate(var(--dsmqa-sat,1));-webkit-backdrop-filter:blur(var(--dsmqa-blur,0px)) saturate(var(--dsmqa-sat,1))}
 /* v0.5.4 分组可收起（替代「按上限截断」）：表头即开关，收起后只留标题与计数。 */
 .dsm-qa-fold{width:100%;box-sizing:border-box;background:0 0;border:0;padding:2px 0;color:inherit;font:inherit;cursor:pointer;text-align:left}
 .dsm-qa-fold:hover{opacity:.95}
@@ -844,9 +844,14 @@ function dsmFitPanel(el) {
       // 0 高兄弟节点带来的外边距）。跟随胶囊时面板是张材质卡片，这段空隙会让卡片和
       // 上方导航之间露出一条宿主底色——用户实测反馈「距离侧边栏顶部导航还有一截距离」。
       // 写成变量后由 CSS 用负 margin 吃掉；上限 40px，避免宿主布局异常时把面板拉飞。
-      const gapTop = Math.max(0, Math.min(40, Math.round(el.getBoundingClientRect().top - ar.top)))
+      // v3.13.3：负 margin 一旦生效，el.top - ar.top 恒为 0 —— 每次重算都把自己抹平，
+      // 面板弹回原位，用户看到的就是「修了但空隙还在」。所以先把上一次已经吃掉的量
+      // 加回来，得到未被 margin 干预的「自然位置」，再据此决定吃多少（幂等）。
+      const appliedGap = Number.parseFloat(el.style.getPropertyValue('--dsmqa-gap-top')) || 0
+      const naturalTop = el.getBoundingClientRect().top - ar.top + appliedGap
+      const gapTop = Math.max(0, Math.min(40, Math.round(naturalTop)))
       const following = document.documentElement.getAttribute('data-dsmqa-follow') === '1'
-      avail = Math.max(200, Math.floor(anc.clientHeight - offset - 6))
+      avail = Math.max(200, Math.floor(anc.clientHeight - (offset + appliedGap) - 6))
       // 跟随态顶部被负 margin 抬高了 gapTop，高度要等量加回来，否则底边会空出同样一截。
       const height = avail + (following ? gapTop : 0)
       el.style.maxHeight = height + 'px'
@@ -6071,7 +6076,7 @@ export function apply(ctx) {
   // 同一能力也尝试注册为客户端 cordis 服务 'lyinSessions'（可用则用）。
   try {
     const api = {
-      version: '3.13.2',
+      version: '3.13.3',
       openSession(id) {
         const target = id === null || id === undefined ? '' : String(id)
         if (!target) return false
