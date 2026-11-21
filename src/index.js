@@ -36,6 +36,7 @@ import { createSessionMetaCache, fingerprintOf, persistFingerprintOf } from './s
 import { createTitleIndexStore } from './title-persist-index.js'
 import { createEmptyScanStore } from './empty-scan-index.js'
 import { appendDebugLog, normalizeDebugLines, DEBUG_LOG_MAX_BYTES, DEBUG_LOG_KEEP } from './debug-log.js'
+import { collectBackgroundJobs } from './background-jobs.js'
 import { createActiveSessionTracker } from './active-session.js'
 import { createPersistenceAdapter } from './compat/persistence.js'
 import { detectCapabilities, requireCapability } from './compat/capabilities.js'
@@ -1827,6 +1828,24 @@ export function apply(ctx) {
   // 标题原先「首次调用算一次就永久缓存」，日志之后再变也不会更新——标题会陈旧。
   // 现在复用 metaCache：每次调用只 stat 一遍，日志没变直接取缓存，变了才重解码，
   // 既不会陈旧也不会回到「每次全量解码」。
+  // 后台任务字段（v3.14.0）。抽成独立函数是为了两件事：
+  //   ① `ctx.get('jobs')` / `ctx.get('agents')` 都在**每次取**时判存活——宿主
+  //      这两个插件是可选组合，热停用后服务会消失；
+  //   ② 任何异常都吞掉，返回 `{}`：后台任务只是侧栏的附加装饰，它坏掉不该让整份
+  //      sidebar-state 变成 500，那会连标题、回收站、血缘一起挂掉。
+  // 载荷字段名用 `backgroundJobs`（按 session id 索引的数组），只有真有时才下发，
+  // 避免给每个会话都塞一个空数组把载荷撑大。
+  function backgroundJobsField() {
+    try {
+      const map = collectBackgroundJobs(ctx.get('agents'), ctx.get('jobs'))
+      const keys = Object.keys(map || {})
+      if (!keys.length) return {}
+      return { backgroundJobs: map }
+    } catch (e) {
+      return {}
+    }
+  }
+
   async function sidebarAuthority() {
     const ids = []
     let entries = []
@@ -1932,6 +1951,13 @@ export function apply(ctx) {
         try { return archivedWorkspaceKeys(await workspaceArchive.read()) } catch (e) { return [] }
       })(),
       lineage,
+      // 后台任务（v3.14.0）：会话回合结束后它留下的 job 可能还在跑，侧栏据此在
+      // 行前挂一个小三角、就地展开任务名与运行时长。
+      // 来源是宿主 `jobs` + `agents` 两个服务（`agents.list()` 给 live agent id，
+      // 而 agent id 恒等于 session id；`jobs.list(caller)` 按 owner 隔离，所以只能
+      // 逐个会话问一遍）。宿主没装这两个插件时 collectBackgroundJobs 返回空对象，
+      // 这里就省掉整个字段——旧宿主上的载荷与 3.13.x 完全一致。
+      ...backgroundJobsField(),
       // v3.6.2：还有预热/退避重试在途 → client 缩短轮询节拍，预热一完成就把
       // 补齐的标题送回（含面板自动刷新）。无预热 API 时恒 false，绝不假忙。
       warmPending: warmPendingNow(),

@@ -14,6 +14,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { aliveSessionCount, applyTagFilter, ascPriority, canDropOnWorkspace, collapsedVisibleTotal, countRenderedVisible, dotStateFor, dragAutoScrollStep, effectiveTitleOf, filterShapeFromSaved, filterSnapshotOf, foldActivityItems, foldBranches, foldOrphanSubagents, foldSubagentRows, foldSubagents, groupQuickAccess, isWorkspaceSentinel, markedRowsByKind, matchWorkspaceFilter, shouldHideEmptyGroup, WS_GONE, WS_UNGROUPED, mergeActivityItems, normalizeCollapsed, noticeToastPlan, QA_MARKED_KIND_HINT, QA_MARKED_KIND_LABEL, QA_MARKED_KINDS, QA_RECENT_WINDOW_MS, recentActiveRows, stateFromSessionStatus, summaryCounts, openSubagentToast, overflowPlan, pathTail, priorityOf, remainingRows, reviewOf, sessionForNodes, shortId, starredOf, tagDeleteConfirm, titleBackfillDecision, toastDurationFor, workspaceForNodes } from './logic.js'
 
 import { visibleItemsAfterWorkspaceFold, workspaceKeyOf } from '../workspace-archive-core.js'
+import { JOB_BADGE_MAX_ROWS, jobBadgeText, jobDurationLabel } from '../background-jobs.js'
 import { CAPSULE_COLOR_KEY, CAPSULE_DISPLAY_KEY, CAPSULE_EVENTS, CAPSULE_NOTICE_KEY, FOLLOW_PRESET, QA_STYLE_VAR_KEYS, capsuleFollowInfo, qaVarsFromCapsule } from './capsule-link.js'
 
 export const inject = ['slots']
@@ -4223,6 +4224,14 @@ const SIDEBAR_AUG_CSS = `
 .dsm-sub-btn-danger{color:var(--dsw-alias-state-error-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-error-primary) 40%,transparent)}
 .dsm-sub-note{font-size:11px;color:var(--dsw-alias-label-tertiary);padding:2px 0}
 .dsm-kids-badge:hover{background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 18%,transparent)}
+/* v3.14.0 后台任务小三角：常驻显示（它就是「这个会话还有活儿在跑」的唯一提示），
+   所以不吃 .dsm-kids-badge 那套「悬停才出现」的显隐规则，也不抢 margin-left:auto
+   ——它在状态点之后、标题之前，宽度只占一个三角加数字。 */
+.dsm-jobs-badge{appearance:none;display:inline-flex;align-items:center;flex:none;pointer-events:auto;margin:0 2px 0 0;padding:0 4px;border:none;border-radius:6px;background:transparent;color:var(--dsw-alias-state-warn-primary,#EAB308);font:inherit;font-size:10px;font-weight:700;line-height:15px;letter-spacing:.5px;cursor:pointer}
+.dsm-jobs-badge:hover{background:color-mix(in srgb,var(--dsw-alias-state-warn-primary,#EAB308) 16%,transparent)}
+.dsm-jobs .dsm-sub-row{cursor:default}
+.dsm-jobs .dsm-sub-row:hover{background:transparent}
+.dsm-job-age{margin-left:auto;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums}
 .dsm-row-sub{transform:translateX(calc(10px + var(--dsm-indent,0px)));transition:transform .15s ease}
 .dsm-row-sub::before{content:'';position:absolute;left:calc(-6px - var(--dsm-indent,0px));top:0;bottom:0;width:2px;border-radius:1px;background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 30%,transparent);pointer-events:none}
 .dsm-tag{display:inline-flex;align-items:center;margin-left:auto;padding:1px 7px;border-radius:999px;background:var(--dsw-alias-fill-subtle);color:var(--dsw-alias-label-tertiary);font-size:10px;font-weight:500;line-height:15px;flex:none;pointer-events:auto;border:none;cursor:default}
@@ -4272,6 +4281,19 @@ let dsmTrashCountByCwd = null
 // 侧栏按 group.cwd 折叠后比对、整组隐藏；面板列表按 item.workspacePath 过滤。
 // 只读：写入走 /archived-sessions/workspace-archives。
 let dsmArchivedWsKeys = new Set()
+// v3.14.0 后台任务：session id → 该会话还在跑的作业行（`{id,label,kind,status,startedAt}`）。
+// 由 /archived-sessions/sidebar-state 的 backgroundJobs 字段下发；宿主没有
+// jobs/agents 服务时该字段缺失 → 空 Map，整个特性和 3.13.x 一样不存在。
+// 用途有二：① 行前小三角（▸ N）表明可展开；② 有活作业的会话即使被标记已读、
+// 也继续留在「刚完成」里——这正是用户要解决的「找不到是哪个会话还在后台干活」。
+const dsmJobMap = new Map()
+// 展开态与子代理分开存：两种列表互不影响，各自的折叠状态要能独立记住。
+const DSM_KEY_JOBS = 'dsm-jobs-open-v1'
+const dsmJobsOpen = new Set()
+if (typeof localStorage !== 'undefined') {
+  try { for (const id of JSON.parse(localStorage.getItem(DSM_KEY_JOBS) || '[]')) if (typeof id === 'string') dsmJobsOpen.add(id) } catch (e) { /* 存储不可用：仅本会话内存态 */ }
+}
+const dsmSaveJobsOpen = () => { try { localStorage.setItem(DSM_KEY_JOBS, JSON.stringify([...dsmJobsOpen])) } catch (e) { /* 无视 */ } }
 let dsmServerPurgedIds = new Set()
 let dsmAuthoritativeTitles = new Map()
 let dsmTrashTick = 0
@@ -4345,6 +4367,16 @@ async function dsmLoadTrashIds() {
     // 旧 host 无该字段 → 空集合，行为与 3.11.x 完全一致。
     const wsKeys = Array.isArray(r && r.archivedWorkspaceKeys) ? r.archivedWorkspaceKeys : []
     dsmArchivedWsKeys = new Set(wsKeys.map((k) => String(k)).filter(Boolean))
+    // v3.14.0 后台任务：host 只下发「有活作业的会话」，缺字段即没有。整表替换而非
+    // 增量合并——某个会话的作业全结算了，它就该从三角里消失，不留残影。
+    dsmJobMap.clear()
+    const jobsField = r && r.backgroundJobs && typeof r.backgroundJobs === 'object' ? r.backgroundJobs : null
+    if (jobsField) {
+      for (const [sid, rows] of Object.entries(jobsField)) {
+        if (!Array.isArray(rows) || !rows.length) continue
+        dsmJobMap.set(String(sid), rows.filter((row) => row && typeof row === 'object' && row.id))
+      }
+    }
     // 服务器已确认的乐观标记随即清除；未被确认的标记最多存活到下次刷新，
     // 绝不永久压住后来同 id 的新会话。
     for (const id of [...dsmPendingPurged]) {
@@ -4420,7 +4452,7 @@ function dsmTeardownSidebarAug() {
   if (typeof dsmSidebarCleanup === 'function') { try { dsmSidebarCleanup() } catch (e) { /* best-effort */ } }
   dsmSidebarCleanup = null
   if (typeof document === 'undefined') return
-  const selectors = ['[data-dsm-dot]', '[data-dsm-kids]', '[data-dsm-subs]', '[data-dsm-tag]']
+  const selectors = ['[data-dsm-dot]', '[data-dsm-kids]', '[data-dsm-subs]', '[data-dsm-tag]', '[data-dsm-jobs]', '[data-dsm-jobs-badge]']
   for (const sel of selectors) {
     try { document.querySelectorAll(sel).forEach((el) => el.remove()) } catch (e) { /* best-effort */ }
   }
@@ -5251,6 +5283,7 @@ function installSidebarStatusDots() {
         const d = row.querySelector('[' + DOT + ']'); if (d) d.remove()
         quickAccessRegistry.delete(String(id)) // 行被隐藏：从快捷面板移除
         dsmDropSubList(row, id)
+        dsmDropJobList(row, id)
         return
       }
       // ---- 血缘分层披露（issue #6）--------------------------------------
@@ -5285,6 +5318,7 @@ function installSidebarStatusDots() {
         const d = row.querySelector('[' + DOT + ']'); if (d) d.remove()
         quickAccessRegistry.delete(String(id)) // 行被隐藏：从快捷面板移除
         dsmDropSubList(row, id)
+        dsmDropJobList(row, id)
         return
       }
       if (row.style.display === 'none') row.style.display = ''
@@ -5371,6 +5405,56 @@ function installSidebarStatusDots() {
         const staleKids = row.querySelector('[data-dsm-kids]')
         if (staleKids) staleKids.remove()
       }
+      // ---- v3.14.0 后台任务小三角 ----------------------------------------
+      // 会话回合结束后它留下的 job 可能还在跑。这里给这样的行挂一个「▸ N」。
+      // 与子代理徽标刻意分开：语义不同（子代理是「下钻会话」，后台任务是
+      // 「本会话还有活儿在跑」），同时存在时两个徽标都该看得见。
+      if (!isEmpty && !isSub) {
+        const jobRows = dsmJobMap.get(id)
+        const existingJob = row.querySelector('[data-dsm-jobs-badge]')
+        if (jobRows && jobRows.length) {
+          const open = dsmJobsOpen.has(id)
+          const text = jobBadgeText(jobRows.length, open)
+          let badge = existingJob
+          if (!badge) {
+            badge = document.createElement('button')
+            badge.type = 'button'
+            badge.dataset.dsmJobsBadge = ''
+            badge.className = 'dsm-jobs-badge'
+            badge.addEventListener('click', (e) => {
+              e.stopPropagation(); e.preventDefault()
+              dsmToggleJobs(badge)
+            })
+            // 用户要的是「会话前的小三角」——放在状态点之后、标题之前，而不是
+            // 像子代理徽标那样贴右边（那个是计数，这个是「这行还有活儿」）。
+            // 不能直接插成 firstChild：插件自己的状态点是 `position:absolute;
+            // left:6px`，插在它前面会被压在下面。挂在宿主状态点之后最稳。
+            const hostDot = row.querySelector('[data-state]')
+            if (hostDot && hostDot.parentNode === row) row.insertBefore(badge, hostDot.nextSibling)
+            else row.insertBefore(badge, row.firstChild)
+          }
+          // 同子代理徽标：id 存 dataset，React 复用行 DOM 后点哪个行读哪个 id。
+          if (badge.dataset.dsmJobParentId !== id) badge.dataset.dsmJobParentId = id
+          if (badge.textContent !== text) badge.textContent = text
+          const label = (open ? '收起' : '展开') + '该会话的 ' + jobRows.length + ' 个后台任务'
+          if (badge.getAttribute('aria-label') !== label) {
+            badge.setAttribute('aria-label', label)
+            badge.title = label
+          }
+          if (badge.getAttribute('aria-expanded') !== String(open)) badge.setAttribute('aria-expanded', String(open))
+          // 展开态让整行保持 dsm-row-open，否则徽标随鼠标移开就消失、列表收不回来。
+          if (open) row.classList.add('dsm-row-open')
+          if (open) dsmSyncJobList(row, id)
+          else dsmDropJobList(row, id)
+        } else {
+          if (existingJob) existingJob.remove()
+          dsmDropJobList(row, id)
+        }
+      } else {
+        const staleJob = row.querySelector('[data-dsm-jobs-badge]')
+        if (staleJob) staleJob.remove()
+        dsmDropJobList(row, id)
+      }
       // DSH's cold list baseline can expose a stale header title until the
       // Session is opened. Paint the latest log-folded title from the host
       // authority without materializing the Session or changing its log.
@@ -5430,11 +5514,17 @@ function installSidebarStatusDots() {
       }
       const turnKind = dsmTurnKind.get(sid)
       const failedKinds = { error: 1, aborted: 1, interrupted: 1 }
+      // v3.14.0：这个会话还有后台任务在跑。它是「刚完成」的独立依据——用户点进
+      // 会话会把 runSeen 清掉（视为已读），但只要作业还没收尾，它就该继续留在
+      // 「刚完成」里，否则就回到用户抱怨的那个局面：会话看起来干完了，实际还有
+      // 东西在后台占资源，而侧栏上找不到是谁。
+      const hasBgJobs = (dsmJobMap.get(sid) || []).length > 0
       let qaState = null
       if (manualUnread.has(sid)) qaState = 'manual'
       else if (isWarning) qaState = 'feedback'
       else if (isRunning) qaState = 'running'
       else if (dsmRunSeen.has(sid)) qaState = (turnKind && failedKinds[turnKind]) ? 'error' : 'done'
+      else if (hasBgJobs) qaState = 'done'
       // 「曾经跑过、现在不跑」= 刚结束：reason.kind 为 error/aborted/interrupted
       // 归「出错」，其余归「刚完成」。
       if (qaState) {
@@ -5616,6 +5706,81 @@ function installSidebarStatusDots() {
       box.appendChild(r)
     }
   }
+  // ---- v3.14.0 侧栏就地展开后台任务 ---------------------------------------
+  // 与上面的子代理列表同构（幂等容器 + 签名比对），但数据不来自 lineage-tree，
+  // 而是 host 随 sidebar-state 下发的 backgroundJobs 快照——所以这里没有 fetch，
+  // 也没有 TTL：`dsmJobMap` 每轮轮询整表刷新，同步函数只负责把当下快照画出来。
+  function dsmToggleJobs(badge) {
+    const sid = badge && badge.dataset ? badge.dataset.dsmJobParentId : null
+    if (!sid) return
+    if (dsmJobsOpen.has(sid)) dsmJobsOpen.delete(sid)
+    else dsmJobsOpen.add(sid)
+    dsmSaveJobsOpen()
+    if (dsmRepaintDots) dsmRepaintDots()
+  }
+  function dsmDropJobList(row, sid) {
+    const parent = row.parentNode
+    if (!parent) return
+    for (const el of parent.children) {
+      if (el.getAttribute && el.getAttribute('data-dsm-jobs') === sid) { el.remove(); break }
+    }
+  }
+  function dsmSyncJobList(row, sid) {
+    const parent = row.parentNode
+    if (!parent) return
+    const open = dsmJobsOpen.has(sid)
+    let box = null
+    for (const el of parent.children) {
+      if (el.getAttribute && el.getAttribute('data-dsm-jobs') === sid) { box = el; break }
+    }
+    if (!open) { if (box) box.remove(); return }
+    const rows = dsmJobMap.get(sid) || []
+    // 快照里已经没有这个会话的活作业了：收起列表并顺手清掉展开态，否则用户
+    // 下次还会看到一个永远空着的展开区。
+    if (!rows.length) {
+      if (box) box.remove()
+      if (dsmJobsOpen.delete(sid)) dsmSaveJobsOpen()
+      return
+    }
+    if (!box) {
+      box = document.createElement('div')
+      box.setAttribute('data-dsm-jobs', sid)
+      box.className = 'dsm-subs dsm-jobs'
+      parent.insertBefore(box, row.nextSibling)
+    } else if (box.nextElementSibling !== row.nextSibling && box.previousElementSibling !== row) {
+      // React 重排后容器可能不在原位：搬回会话行下方。
+      parent.insertBefore(box, row.nextSibling)
+    }
+    // 签名里带上「算到某一分钟为止的时长」：纯 startedAt 不变的快照签名恒定，
+    // 面板就再也不会重画「运行时长」（用户看到的将是一个冻住的「1 分钟」）。
+    // 秒级用 floor(now/1000) 会让签名每拍都变、整块列表反复重建，没必要。
+    const now = Date.now()
+    const sig = rows.map((j) => [j.id, j.label, j.status, Math.floor((now - (j.startedAt || now)) / 60000)].join(':')).join(';')
+    if (box.dataset.dsmSig === sig) return
+    box.dataset.dsmSig = sig
+    box.textContent = ''
+    const shown = rows.slice(0, JOB_BADGE_MAX_ROWS)
+    for (const job of shown) {
+      const r = document.createElement('div')
+      r.className = 'dsm-sub-row dsm-job-row'
+      r.title = job.label + '\n状态：' + (job.status || '未知') + '\n任务 ID：' + job.id
+      const name = document.createElement('span')
+      name.className = 'dsm-sub-name'
+      name.textContent = job.label
+      r.appendChild(name)
+      const meta = document.createElement('span')
+      meta.className = 'dsm-sub-meta dsm-job-age'
+      meta.textContent = job.startedAt ? jobDurationLabel(now - job.startedAt) : (job.status === 'stopping' ? '收尾中' : '运行中')
+      r.appendChild(meta)
+      box.appendChild(r)
+    }
+    if (rows.length > shown.length) {
+      const more = document.createElement('div')
+      more.className = 'dsm-sub-note'
+      more.textContent = '还有 ' + (rows.length - shown.length) + ' 个后台任务未列出'
+      box.appendChild(more)
+    }
+  }
   // MutationObserver 增量驱动为主（childList + 属性 + 文本），彻底替代高频率
   // 全表定时扫描；保留一个低频兜底 tick 处理无 DOM 变化的状态迁移，且后台
   // 标签页完全不跑。回收站/墓碑集合的刷新也挂在这个兜底上（每 8 拍 ≈ 32s）。
@@ -5627,7 +5792,9 @@ function installSidebarStatusDots() {
     // v3.6.2 C：预热在途时每拍（4s）都拉 sidebar-state，补齐结果立刻浮现；
     // 空闲时维持低频 32s（3.4.1 移除全表轮询的性能决策不回退——这里轮询的
     // 是轻量 authority 路由，且仅在有活可补的窗口期加速）。T1：精判同闸。
-    const cadence = (dsmWarmPending || dsmRefinePending) ? 1 : 8
+    // v3.14.0：有后台任务在跑时也加速到每拍——作业结算了三角该尽快消失，
+    // 卡在 32s 台阶上会让人以为那活儿一直没完。只在真有时才提速，空闲照旧。
+    const cadence = (dsmWarmPending || dsmRefinePending || dsmJobMap.size) ? 1 : 8
     if (++dsmTrashTick % cadence === 0) dsmLoadTrashIds()
     paint()
   }
@@ -6076,7 +6243,7 @@ export function apply(ctx) {
   // 同一能力也尝试注册为客户端 cordis 服务 'lyinSessions'（可用则用）。
   try {
     const api = {
-      version: '3.13.3',
+      version: '3.14.0',
       openSession(id) {
         const target = id === null || id === undefined ? '' : String(id)
         if (!target) return false
