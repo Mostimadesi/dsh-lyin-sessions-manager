@@ -199,7 +199,7 @@ body[data-ds-dark-theme] .archv{color-scheme:dark}
 /* v0.5.3 滚动：分区变多后面板可能比容器还高，两个形态各自成为滚动容器。
    max-height:100% 只在宿主给定了容器高度时生效——宿主若本来就是整页滚动，
    这条不产生任何变化（不会出现「滚动条里还有滚动条」的并排双条）。 */
-.dsm-qa-main{padding:18px 22px;box-sizing:border-box;width:100%;max-width:var(--dsmqa-width,760px);margin:0 auto;font-size:13px;color:var(--dsmqa-fg,#F1EFE8);max-height:100%;overflow-y:auto}
+.dsm-qa-main{padding:18px 22px;box-sizing:border-box;min-width:0;max-width:var(--dsmqa-width,760px);margin:0 auto;font-size:13px;color:var(--dsmqa-fg,#F1EFE8);max-height:100%;overflow-y:auto}
 .dsm-qa-main-head{display:flex;align-items:baseline;gap:12px;margin-bottom:14px}
 .dsm-qa-main-title{font-size:16px;font-weight:700;letter-spacing:.3px}
 .dsm-qa-main-count{font-size:12px;opacity:.6}
@@ -208,7 +208,7 @@ body[data-ds-dark-theme] .archv{color-scheme:dark}
 .dsm-qa-main .dsm-qa-row{padding:9px 12px;font-size:13px}
 /* v0.3.0 右侧栏形态：窄布局（右栏 ~320px），去大内边距、行更紧凑。
    v0.5.3：同样自成滚动容器（右栏高度有限，分区多了必须能滚）。 */
-.dsm-qa-rail{padding:10px 12px;box-sizing:border-box;width:100%;max-width:none;margin:0;font-size:12.5px;color:var(--dsmqa-fg,#F1EFE8);max-height:100%;overflow-y:auto}
+.dsm-qa-rail{padding:10px 12px;box-sizing:border-box;min-width:0;max-width:100%;margin:0;font-size:12.5px;color:var(--dsmqa-fg,#F1EFE8);max-height:100%;overflow-y:auto}
 .dsm-qa-rail .dsm-qa-main-head{margin-bottom:8px;gap:8px}
 .dsm-qa-rail .dsm-qa-main-title{font-size:13px;font-weight:600}
 .dsm-qa-rail .dsm-qa-main-count{font-size:11px;opacity:.6}
@@ -6323,7 +6323,7 @@ export function apply(ctx) {
   // 同一能力也尝试注册为客户端 cordis 服务 'lyinSessions'（可用则用）。
   try {
     const api = {
-      version: '3.14.2',
+      version: '3.14.3',
       openSession(id) {
         const target = id === null || id === undefined ? '' : String(id)
         if (!target) return false

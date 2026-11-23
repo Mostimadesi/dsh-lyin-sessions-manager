@@ -3,7 +3,7 @@
 > 写给「接手后续维护的新会话 / 新维护者」。目标是让你在不读 5000 行源码的前提下，
 > 20 分钟内能改一行、构建、验证、回滚。
 >
-> 最后更新：2026-11-23（v3.14.2：面板里的小三角改成和侧栏同款——之前是浏览器给 button 的默认灰底方框，和侧栏的橙色 ▸ 不是一个东西；同时给展开列表补 min-width:0 / max-width:100% / overflow:hidden，长任务名不再把整个面板横向撑开。v3.14.1：后台任务从侧栏 DOM 挪进「进行中的会话」面板——v3.14.0 挂错了地方，用户日常看的是插件自己的面板，侧栏会话行里有三角而面板里没有；面板行因此由 button 改为 div role=button，好让行内的三角是真正可聚焦的 button；v3.14.0：侧栏加「后台任务」—— 回合结束后会话留下的 job 可能还在跑，此时那一行看起来什么都没干。现在给这样的会话在状态点后挂一个「▸ N」小三角，点开就地列出任务名与运行时长；并且只要作业没收尾，即便用户已经点进会话「已读」，该会话仍留在「刚完成」里（否则就回到用户抱怨的那个局面：找不到是谁在后台占资源）。数据取自宿主 `jobs` + `agents` 两个服务，宿主没有它们时整个特性静默不存在；v3.13.3：修掉「修了但空隙还在」——`dsmFitPanel` 里负 margin 一旦生效，`el.top - ar.top` 恒为 0，每次重算都把自己抹平；改为先加回上次已吃掉的 `--dsmqa-gap-top` 得到自然位置再决定吃多少（幂等）。同时跟随态把面板的 `padding-top` 归零、吸顶条的负 `margin-top` 归零，顶条直接贴住面板上沿。v3.13.2：筛选框搬进吸顶条内部一起吸顶、顶部那截空隙用 `--dsmqa-gap-top` 负 margin 吃掉（顺带增强 `panel:fit` 日志：`pt=/st=/stTop=/sh=/chh=/stv=`）；v3.13.1：修正胶囊材质的「应用范围」——吸顶条不再是实色深条、面板铺满整块可用区域而不是只包住内容、跟随态默认默认铺满宽度而非 760px 窄卡；v3.13.0 是快捷面板外观可以「跟随歌词胶囊」——读 netease-lyrics 的 localStorage 与事件，把它的 7 种胶囊样式映射成本插件的 CSS 变量；v3.12.0 是 debug.log 轮转、已标记拆三小行、工作区筛选哨兵、工作区归档（只做可见性）、`check:schema` 上游格式哨兵，并手工卸载了 `dsh-mcp-manager`。能力范围 = v0.5.5 MCP 开关 + v0.6.1 skill 管理 + v0.6.2/v0.6.3 缺陷修复 + v3.12.0 工作区归档 + v3.13.0/3.13.1/3.13.2/3.13.3 胶囊联动）
+> 最后更新：2026-11-23（v3.14.3：把 v3.14.2 给 `.dsm-qa-main` / `.dsm-qa-rail` 加的 `width:100%` 删掉——它解决了「被内容顶宽」，却把面板变成「永远铺满」，用户 m03562 反馈不自然。改回 `min-width:0` + `max-width` + `margin:0 auto`，块级默认行为接管；v3.14.2：面板里的小三角改成和侧栏同款——之前是浏览器给 button 的默认灰底方框，和侧栏的橙色 ▸ 不是一个东西；同时给展开列表补 min-width:0 / max-width:100% / overflow:hidden，长任务名不再把整个面板横向撑开。v3.14.1：后台任务从侧栏 DOM 挪进「进行中的会话」面板——v3.14.0 挂错了地方，用户日常看的是插件自己的面板，侧栏会话行里有三角而面板里没有；面板行因此由 button 改为 div role=button，好让行内的三角是真正可聚焦的 button；v3.14.0：侧栏加「后台任务」—— 回合结束后会话留下的 job 可能还在跑，此时那一行看起来什么都没干。现在给这样的会话在状态点后挂一个「▸ N」小三角，点开就地列出任务名与运行时长；并且只要作业没收尾，即便用户已经点进会话「已读」，该会话仍留在「刚完成」里（否则就回到用户抱怨的那个局面：找不到是谁在后台占资源）。数据取自宿主 `jobs` + `agents` 两个服务，宿主没有它们时整个特性静默不存在；v3.13.3：修掉「修了但空隙还在」——`dsmFitPanel` 里负 margin 一旦生效，`el.top - ar.top` 恒为 0，每次重算都把自己抹平；改为先加回上次已吃掉的 `--dsmqa-gap-top` 得到自然位置再决定吃多少（幂等）。同时跟随态把面板的 `padding-top` 归零、吸顶条的负 `margin-top` 归零，顶条直接贴住面板上沿。v3.13.2：筛选框搬进吸顶条内部一起吸顶、顶部那截空隙用 `--dsmqa-gap-top` 负 margin 吃掉（顺带增强 `panel:fit` 日志：`pt=/st=/stTop=/sh=/chh=/stv=`）；v3.13.1：修正胶囊材质的「应用范围」——吸顶条不再是实色深条、面板铺满整块可用区域而不是只包住内容、跟随态默认默认铺满宽度而非 760px 窄卡；v3.13.0 是快捷面板外观可以「跟随歌词胶囊」——读 netease-lyrics 的 localStorage 与事件，把它的 7 种胶囊样式映射成本插件的 CSS 变量；v3.12.0 是 debug.log 轮转、已标记拆三小行、工作区筛选哨兵、工作区归档（只做可见性）、`check:schema` 上游格式哨兵，并手工卸载了 `dsh-mcp-manager`。能力范围 = v0.5.5 MCP 开关 + v0.6.1 skill 管理 + v0.6.2/v0.6.3 缺陷修复 + v3.12.0 工作区归档 + v3.13.0/3.13.1/3.13.2/3.13.3 胶囊联动）
 
 ---
 
@@ -14,7 +14,7 @@
 | 本机仓库路径 | `D:\DeepSeek Harness\workspace\plugins_helper\session-manager-unified\dsh-lyin-sessions-manager` |
 | 分支 / 远程 | `main`；`origin` = https://github.com/Mostimadesi/dsh-lyin-sessions-manager（公开），`upstream` = TOBYCAI/dsh-sessions-manager |
 | 插件包名 | `dsh-lyin-sessions-manager`（**改包名要同时改** `build.mjs` 的 ModuleLoader banner） |
-| package 版本 | `3.14.2`（上游 3.7.10 → 3.8.0 面板能力 → 3.9.0 加 MCP 开关 → 3.10.0 加 skill 管理 → 3.10.1 维护栏分组 → 3.10.2 评审加固 → 3.10.3 全量自审修复 → 3.11.0 debug.log 轮转 + 已标记拆三行 + 工作区筛选哨兵 → 3.12.0 工作区归档 + `check:schema` → 3.13.0 面板外观跟随歌词胶囊 → 3.13.1 材质铺满面板 + 吸顶条去实色 + 默认铺满宽度 → 3.13.2 筛选框进吸顶条 + 顶部空隙用负 margin 吃掉 → 3.13.3 负 margin 幂等化（否则重算即抹平）+ 顶条贴住面板上沿 → 3.14.0 侧栏「后台任务」小三角 + 就地展开 → 3.14.1 后台任务挪进「进行中的会话」面板 → 3.14.2 三角外观对齐侧栏 + 长任务名不再撑宽面板） |
+| package 版本 | `3.14.3`（上游 3.7.10 → 3.8.0 面板能力 → 3.9.0 加 MCP 开关 → 3.10.0 加 skill 管理 → 3.10.1 维护栏分组 → 3.10.2 评审加固 → 3.10.3 全量自审修复 → 3.11.0 debug.log 轮转 + 已标记拆三行 + 工作区筛选哨兵 → 3.12.0 工作区归档 + `check:schema` → 3.13.0 面板外观跟随歌词胶囊 → 3.13.1 材质铺满面板 + 吸顶条去实色 + 默认铺满宽度 → 3.13.2 筛选框进吸顶条 + 顶部空隙用负 margin 吃掉 → 3.13.3 负 margin 幂等化（否则重算即抹平）+ 顶条贴住面板上沿 → 3.14.0 侧栏「后台任务」小三角 + 就地展开 → 3.14.1 后台任务挪进「进行中的会话」面板 → 3.14.2 三角外观对齐侧栏 + 长任务名不再撑宽面板 → 3.14.3 面板不再强制铺满（删 width:100%）） |
 | 目标宿主 | DSH **0.2.2-rc.1**（`D:\DeepSeek Harness`，nightly 通道） |
 | 构建 | `npm run build` → 产出 `lib/index.js` + `lib/client.js`（**产物要提交**） |
 | 测试 | `npm test`（= `node scripts/run-tests.mjs`，55 个测试文件 / 561 项，Windows 基线 5 项失败见 §7.2） |
@@ -283,7 +283,7 @@ git stash push -u -q && npm test ; git stash pop   # 在 pristine 状态跑一�
 
 ### 7.3 最近一次全绿记录
 
-- build stamp `3.14.2+7fc6f53d`（v3.14.2 三角外观对齐侧栏 + 长任务名不再撑宽面板；v3.14.1 见 `fe684f5`，v3.14.0 见 `13809ee`，v3.13.3 见 `46d5c8d`）
+- build stamp `3.14.3+38481fe0`（v3.14.3 面板不再强制铺满；v3.14.2 见 `902c53d`，v3.14.1 见 `fe684f5`，v3.14.0 见 `13809ee`，v3.13.3 见 `46d5c8d`）
 - 上一版：build stamp `3.13.3+6ccf65f3`（v3.13.3 负 margin 幂等化 + 顶条贴住面板上沿；v3.13.2 见 `7bd48b3`，v3.13.1 见 `8fd002f`）
 - **561 项 / 556 通过 / 5 失败**（失败集都在 §7.2 那 5 项 Windows 基线里，按测试名对照）——**无新增回归**
 - v3.14.0 新增单测：`tests/background-jobs.test.js` 20 项（owner 过滤、未知状态不当活、排序去重、时长分级、徽标文本）、`tests/background-jobs-routes.test.js` 4 项（分组下发、无服务时不出字段的向后兼容断言、两个服务的异常隔离），全绿
@@ -437,6 +437,9 @@ localStorage（浏览器侧）：
 
 58. **面板里的控件要和侧栏那套「同一个样子」。** v3.14.1 的三角用 `<button>`，但只写了颜色没写 `appearance:none;border:none;background:transparent`，浏览器就给它画了默认的灰底圆角方框，和侧栏注入的那个橙色纯文字 `▸ 1` 一眼能看出是两个东西（用户拿两张截图并排比出来的）。教训：跨两套渲染器做同一个控件时，把样式规则整条抄过去，别只抄颜色。
 59. **横排里的长文本要把链条上每一环都设成可收缩。** 任务名把面板横向撑开，是因为 flex 子项的 `min-width` 默认是 `auto`（不低于内容宽度）：`.dsm-qa-job-name` 不写 `min-width:0`、`.dsm-qa-jobs` 不写 `max-width:100%`、行本身不写 `min-width:0;box-sizing:border-box`、容器 `.dsm-qa-main/-rail` 不写 `width:100%;box-sizing:border-box`——缺哪一环，`text-overflow:ellipsis` 都不生效，整块被内容顶宽。
+60. **`width:100%` 与 `min-width:0` 解决的是两个相反的问题，别混用**。v3.14.2 想解决「长任务名把面板顶宽」，给 `.dsm-qa-main` / `.dsm-qa-rail` 加了 `width:100%`；结果变成「无论内容多少都铺满整块区域」，用户 m03562 反馈不自然。正确分工：**防被内容顶宽** → 链路上每一环 `min-width:0` + `overflow:hidden`；**防强制占满** → 容器不要写 `width:100%`，用 `max-width` + `margin:0 auto` 让块级默认行为接管。
+61. **从宿主 asar 里找 hash 类名的宽度规则是死路**。`D:/DeepSeek Harness/resources/app.asar` 里能解出 12 个 `.css`，但 `_mainPanel_` / `_centerCol_` 这些 hash 类名 0 命中——它们来自 JS 注入的样式串，不在独立 CSS 文件里。要么在 asar 的 JS 里按 utf8 搜，要么直接实测 `getBoundingClientRect()` 打日志，别再解 CSS。
+
 ## 11. 待办 / 开放问题
 
 | 序号 | 事项 | 现状 | 建议 |
@@ -444,7 +447,7 @@ localStorage（浏览器侧）：
 | 1 | 「收藏 / 待回看 / 优先级」在「已标记」区是否拆成三小行 | **v3.11.0 已拆**：用户拍板「可以拆成三小行」。`logic.markedRowsByKind` 按 star → review → priority 分通道（一个会话只归第一个命中类，`badges` 仍显示全部标记），折叠键是 `sec:marked:star` / `sec:marked:review` / `sec:marked:priority` | 已闭合；改口径先看 `tests/panel-sections.test.js` 的 4 项断言 |
 | 2 | 右栏（侧边栏）形态的滚动/高度是否真的生效 | **2026-11-18 已验证生效**：`panel:fit avail=738 anc=div.acoR2W_tabBody ch=744`，`panel:scroll 0:div.dsm-qa-rail oy=auto ch=351 sh=351`（rail 内容不溢出，故无需滚动）；主面板侧 `0:div.dsm-qa-main oy=auto ch=487 sh=487` 同样不溢出 | 若日后内容变多，复查 `ch > sh` 且 `oy` 可滚即可，无需再改代码 |
 | 3 | 工作区归档 / 可见性 | **v3.12.0 已移植**（用户选语义 A = 只做可见性）：`src/workspace-archive-core.js` 纯逻辑 + `src/workspace-archive.js` 文件 I/O + 路由 `/archived-sessions/workspace-archives` + 维护栏「工作区归档」sheet + 侧栏 `setGroupHidden` 整组折叠 + 面板 `visibleItemsAfterWorkspaceFold` 过滤。**不动会话归档状态**，所以「已归档」视图保持干净 | 已闭合；语义若要改成「同时归档会话」，改 host 路由的 archive 分支即可，UI 不用动 |
-| 4 | `window.__dshSessionsManager.version` | **v3.14.2 已同步**（现为 `3.14.2`） | 升 package 版本时要同步 5 处：`package.json`、`package-lock.json`（2 处）、`README.md` 的 badge、`src/client/index.jsx` 的 `version:` 字段 |
+| 4 | `window.__dshSessionsManager.version` | **v3.14.3 已同步**（现为 `3.14.3`） | 升 package 版本时要同步 5 处：`package.json`、`package-lock.json`（2 处）、`README.md` 的 badge、`src/client/index.jsx` 的 `version:` 字段 |
 | 5 | `dsmFitPanel` 无单测（依赖 DOM） | 靠日志验证 | 若要测，抽纯函数算 `avail` 再测 |
 | 6 | 上游若有新版格式（落盘 schema 漂移） | **v3.12.0 已加哨兵**：`npm run check:schema` 把 11 份落盘索引的 schemaVersion 钉成表，与 `upstream/main` 逐文件比对；`tests/check-schema.test.js` 3 项自检防止哨兵本身失效（常量改名、新增 store 忘了登记都会红） | 每次 rebase 前跑一次；上游改了版本号就按 §12 末尾的「schema 漂移处置」走 |
 | 7 | MCP 服务器开关（`/archived-sessions/mcp/*` + 维护栏 sheet） | 已实现并通过单测（`tests/mcp-rows.test.js` 13 项 + `tests/mcp-routes.test.js` 2 项） | 真机点一遍；确认重启后 MCP 连接按新开关状态建立 |
@@ -517,13 +520,13 @@ npm run check:schema -- --local # 没有 upstream 分支时只看本地常量是
 
 ## 13. 给接手会话的第一天
 
-1. 读本文件 + `git log --oneline -15`。最近一条应为 v3.14.2（三角外观 + 不撑宽）或其后；`main` 与 `origin/main` 可能差若干条未推送提交，见 §14。
+1. 读本文件 + `git log --oneline -15`。最近一条应为 v3.14.3（面板不再强制铺满）或其后；`main` 与 `origin/main` 可能差若干条未推送提交，见 §14。
 2. `npm run build && npm test && npm run check:schema`，把失败数与 §7.2 的基线对齐（本机 4–5 项，按测试名对照）。若明显超出，先查是不是本机环境变了（`git stash -u` 对照 pristine 再 `git stash pop`）。
 3. 打开面板，看 `debug.log` 里 `session-list:store-ready` / `panel:fit` / `host-list:loaded` 三行是否正常。
 4. 要改 UI 前，先确认改的是现役选择器（`.dsm-qa-main` / `.dsm-qa-rail`），别改已停用的 `.dsm-qa-panel`。
 5. 不要替用户做「拆三行 / 改名」这类产品决定；把方案摆出来让用户选。
 6. 每次提交都跑 `check:dist`，并且把 `lib/` 一起提交。
-7. 改 skill / MCP 子系统前先读 §10 的 17–30 条——那十四条全是评审与自审实测出来的真缺陷，且都有回归测试兜着，改的时候别把它们改回去。改工作区归档或 debug.log 前读 §10 的 31–36 条；改面板外观 / 胶囊联动前读 37–51 条；改后台任务前读 52–59 条。
+7. 改 skill / MCP 子系统前先读 §10 的 17–30 条——那十四条全是评审与自审实测出来的真缺陷，且都有回归测试兜着，改的时候别把它们改回去。改工作区归档或 debug.log 前读 §10 的 31–36 条；改面板外观 / 胶囊联动前读 37–51 条；改后台任务前读 52–61 条。
 8. `edit` 工具写 `src/client/index.jsx` 会产出 **CRLF**。改完用 `git diff --stat` 看行数，异常就用 node `.replace(/\r\n/g,'\n')` 归一化后再 `commit --amend`；长文件优先用 python/node 脚本改而不是 `edit`。
 
 ---
@@ -547,9 +550,9 @@ npm run check:schema -- --local # 没有 upstream 分支时只看本地常量是
 - 不要在命令里回显 token；CC Safety Net 也会拦 `~/.git-credentials`、`~/.ssh` 的读取。
 - 推送体积：`git count-objects -vH` 约 5.6 MiB（`lib/` 已提交、`node_modules` 忽略），常见网络下 push 可能要 30s 以上，别用 30s 超时的前台命令。
 
-## 15. 最近几代改了什么（v0.6.1 → v3.14.2）
+## 15. 最近几代改了什么（v0.6.1 → v3.14.3）
 
-新会话不必回看 git log 的全部细节，这一节就是浓缩版；每条都能在 §10 找到对应的坑与纪律。最近新增的是 v3.11.0 / v3.12.0 / v3.13.0 / v3.13.1 / v3.13.2 / v3.13.3 / v3.14.0 / v3.14.1 / v3.14.2 九节。
+新会话不必回看 git log 的全部细节，这一节就是浓缩版；每条都能在 §10 找到对应的坑与纪律。最近新增的是 v3.11.0 / v3.12.0 / v3.13.0 / v3.13.1 / v3.13.2 / v3.13.3 / v3.14.0 / v3.14.1 / v3.14.2 / v3.14.3 十节。
 
 ### v0.6.1 — skill 管理（`1223c46`）
 - 新增 `src/skill-rows.js`（扫描宿主 skill 根、读/写 SKILL.md frontmatter、三态映射、导入导出、删除）与 `src/zip-lite.js`（零依赖 zip，只用 `node:zlib`）。
@@ -653,6 +656,17 @@ v3.14.0 把三角做在了侧栏 DOM 注入层，用户反馈「左侧工作区�
 - 三角：`.dsm-qa-jobs-t` 之前只有 `color` / `font-size`，浏览器把 `<button>` 的默认可视样式全画出来了（灰底、圆角、内边距）。现在补齐 `appearance:none` / `border:none` / `background:transparent` / `font:inherit` / `border-radius:6px` / `line-height:15px`，与侧栏 `SIDEBAR_AUG_CSS` 里的 `.dsm-jobs-badge` 逐条对齐。
 - 不撑宽：flex 子项的 `min-width` 默认 `auto`，`text-overflow:ellipsis` 要生效必须让链条上每一环都能收缩——`.dsm-qa-job-name{flex:1;min-width:0}`、`.dsm-qa-jobs{min-width:0;max-width:100%;overflow:hidden}`、`.dsm-qa-row{min-width:0;box-sizing:border-box}`、`.dsm-qa-group{min-width:0}`、`.dsm-qa-main/-rail{width:100%;box-sizing:border-box}`。对应 §10 第 58 / 59 条。
 - 纯 CSS，无新增用例（`npm test` 仍是 561 项，基线 4–5 项 Windows 失败）。
+## v3.14.3 面板宽度回归
+
+为什么：v3.14.2 为了让长任务名不把面板撑宽，给 `.dsm-qa-main` 和 `.dsm-qa-rail` 都加了 `width:100%`。这解决了「被内容顶宽」，但也把面板变成「永远铺满整块区域」——用户 m03562 反馈「现在面板默认就是被撑宽的状态，看起来不太自然」。这两件事不是一回事：内容不该决定宽度，面板自己也不该强制占满。
+
+改法：
+- `.dsm-qa-main`：删掉 `width:100%`，保留 `min-width:0`、`max-width:var(--dsmqa-width,760px)`、`margin:0 auto`。宽度回到块级默认（跟随父容器），再由 `max-width` 封顶、`margin:0 auto` 居中。
+- `.dsm-qa-rail`：`width:100%` + `max-width:none` 改为 `min-width:0` + `max-width:100%`。侧栏本来就是窄栏，靠父容器给宽即可。
+
+保留 v3.14.2 的下游收缩链（`.dsm-qa-jobs` / `.dsm-qa-job-name` / `.dsm-qa-row` / `.dsm-qa-group` 的 `min-width:0` + overflow），那是防「被内容顶宽」，与本条不冲突。
+
+
 ## 16. 手工卸载 `dsh-mcp-manager`（2026-11-18 实录）
 
 背景：本插件的 MCP 开关能力不依赖 `dsh-mcp-manager`，用户要把它彻底移除，但市场（`dshmarket`）两条路都走不通。这节记录为什么以及怎么手工做完的，第二次遇到同类问题时照抄。
