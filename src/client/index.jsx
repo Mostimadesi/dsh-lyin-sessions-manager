@@ -157,6 +157,7 @@ body[data-ds-dark-theme] .archv{color-scheme:dark}
 .dsm-qa-row{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:7px 10px;border:none;background:0 0;color:inherit;font-size:12.5px;border-radius:9px;cursor:pointer;transition:background .12s ease}
 .dsm-qa-row:hover{background:rgba(255,255,255,.08)}
 .dsm-qa-row:active{background:rgba(255,255,255,.12)}
+.dsm-qa-row:focus-visible{outline:1px solid var(--dsw-alias-state-business-primary,#5B8DEF);outline-offset:-1px}
 .dsm-qa-row-t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dsm-qa-kids{flex:none;font-size:10.5px;line-height:1;padding:3px 6px;border-radius:999px;border:1px solid rgba(127,127,127,.3);opacity:.75;white-space:nowrap}
 .dsm-qa-err{color:#F87171}
@@ -174,6 +175,17 @@ body[data-ds-dark-theme] .archv{color-scheme:dark}
 .dsm-qa-badge{flex:none;font-size:10px;line-height:1;padding:3px 5px;border-radius:5px;border:1px solid rgba(127,127,127,.32);opacity:.8;white-space:nowrap}
 .dsm-qa-ws{flex:none;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;opacity:.45}
 .dsm-qa-ago{margin-left:auto;flex:none;font-size:11px;opacity:.5;white-space:nowrap}
+/* v3.14.1 面板里的后台任务：行首小三角 + 就地展开的「任务名 + 已经跑了多久」。 */
+.dsm-qa-jobs-t{flex:none;display:inline-flex;align-items:center;padding:0 3px;border-radius:5px;font-size:10px;font-weight:700;line-height:14px;letter-spacing:.4px;color:var(--dsw-alias-state-warn-primary,#EAB308);cursor:pointer;white-space:nowrap}
+.dsm-qa-jobs-t:hover{background:color-mix(in srgb,var(--dsw-alias-state-warn-primary,#EAB308) 16%,transparent)}
+.dsm-qa-jobs-t:focus-visible{outline:1px solid var(--dsw-alias-state-warn-primary,#EAB308);outline-offset:1px}
+.dsm-qa-jobs{margin:1px 0 3px 14px;padding:2px 0 2px 9px;border-left:1px solid rgba(127,127,127,.25);display:flex;flex-direction:column;gap:2px}
+.dsm-qa-job{display:flex;align-items:center;gap:8px;padding:2px 4px;font-size:11.5px;opacity:.72;min-width:0}
+.dsm-qa-job-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dsm-qa-job-age{margin-left:auto;flex:none;font-size:10.5px;opacity:.75;font-variant-numeric:tabular-nums;white-space:nowrap}
+.dsm-qa-job-more{opacity:.45;font-size:10.5px}
+.dsm-qa-rail .dsm-qa-jobs{margin-left:11px}
+.dsm-qa-rail .dsm-qa-job{font-size:11px}
 .dsm-qa-rail .dsm-qa-sum{gap:3px 10px;margin-bottom:9px;padding-bottom:7px;font-size:10.5px}
 .dsm-qa-rail .dsm-qa-sum-all{margin-left:0}
 .dsm-qa-rail .dsm-qa-sec{margin-top:10px;padding-top:8px}
@@ -511,7 +523,10 @@ function dsmRowsFromUiSession() {
   const out = []
   snap.forEach((st, sid) => {
     const id = String(sid)
-    const state = stateFromSessionStatus(st, { manualUnread: manual.has(id), turnKind: dsmTurnKind.get(id) })
+    let state = stateFromSessionStatus(st, { manualUnread: manual.has(id), turnKind: dsmTurnKind.get(id) })
+    // v3.14.1：回合已结束、也已读，但宿主 jobs 里还有活作业 —— 仍然留在「刚完成」，
+    // 否则用户点进去看一眼就再也找不到是谁还在跑后台任务。
+    if (!state && (dsmJobMap.get(id) || []).length) state = 'done'
     if (!state) return
     out.push({ sessionId: id, state, title: dsmTitleOf(id) })
   })
@@ -917,6 +932,9 @@ function DsmQuickAccessPanel({ compact = false } = {}) {
   React.useEffect(() => { dsmDebugLog('rail:body-rendered', 'compact=' + !!compact) }, [compact])
   const [jumpErr, setJumpErr] = React.useState('')
   const [query, setQuery] = React.useState('')
+  // v3.14.1：面板里展开/收起后台任务时强制重渲染（真源仍是模块级 dsmJobsOpen，
+  // 与侧栏那套共用，所以两处开关是同一个状态）。
+  const [, setJobsVer] = React.useState(0)
   React.useEffect(() => {
     // v0.4.0：优先 uiSession（全量、权威），不可用时回退 DOM 采集。
     const collect = () => {
@@ -1002,6 +1020,50 @@ function DsmQuickAccessPanel({ compact = false } = {}) {
       setJumpErr('跳转失败：' + String((e && e.message) || e))
     }
   }
+  // —— v3.14.1 后台任务（面板侧）——
+  // 数据来自宿主 jobs 服务，随 sidebar-state 一起下发（模块级 dsmJobMap）。
+  // 面板只回答「谁还在跑 / 跑了多久」，不提供 kill——那属于宿主自己的 job 入口。
+  const jobsOf = (row) => (row && row.sessionId != null ? (dsmJobMap.get(String(row.sessionId)) || []) : [])
+  const toggleJobsOf = (row) => {
+    const sid = String(row.sessionId)
+    if (dsmJobsOpen.has(sid)) dsmJobsOpen.delete(sid)
+    else dsmJobsOpen.add(sid)
+    dsmSaveJobsOpen()
+    setJobsVer((n) => n + 1)
+  }
+  const renderJobsBadge = (row) => {
+    const jobs = jobsOf(row)
+    if (!jobs.length) return null
+    const open = dsmJobsOpen.has(String(row.sessionId))
+    return (
+      <button
+        type="button"
+        className="dsm-qa-jobs-t"
+        title={jobs.length + ' 个后台任务还在跑（点击' + (open ? '收起' : '展开') + '）'}
+        aria-expanded={open}
+        aria-label={(open ? '收起' : '展开') + '该会话的 ' + jobs.length + ' 个后台任务'}
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleJobsOf(row) }}
+      >{jobBadgeText(jobs.length, open)}</button>
+    )
+  }
+  const renderJobList = (row) => {
+    const jobs = jobsOf(row)
+    if (!jobs.length || !dsmJobsOpen.has(String(row.sessionId))) return null
+    const head = jobs.slice(0, JOB_BADGE_MAX_ROWS)
+    const rest = jobs.length - head.length
+    const nowMs = Date.now()
+    return (
+      <div className="dsm-qa-jobs">
+        {head.map((j) => (
+          <div key={j.id} className="dsm-qa-job">
+            <span className="dsm-qa-job-name">{j.label || j.kind || shortId(j.id)}</span>
+            <span className="dsm-qa-job-age">{jobDurationLabel(nowMs - (j.startedAt || nowMs))}</span>
+          </div>
+        ))}
+        {rest > 0 && <div className="dsm-qa-job dsm-qa-job-more">还有 {rest} 个后台任务未列出</div>}
+      </div>
+    )
+  }
   // 次级区共用渲染：左侧可选徽标（已标记区）→ 标题 → 工作区 → 相对时间。
   // v0.5.4：表头改为可收起的按钮（key 形如 sec:recent / sec:marked）。
   const renderSec = (key, label, hint, shown, total) => {
@@ -1023,9 +1085,10 @@ function DsmQuickAccessPanel({ compact = false } = {}) {
           {hidden > 0 && <span className="dsm-qa-sec-hint">另有 {hidden} 个未显示</span>}
         </button>
         {!off && shown.map((row) => (
-          <button
-            key={row.sessionId}
-            type="button"
+          <React.Fragment key={row.sessionId}>
+          <div
+            role="button"
+            tabIndex={0}
             className="dsm-qa-row"
             title={(row.title || row.sessionId)
               + (row.subagentCount ? `（含 ${row.subagentCount} 个子代理，已折叠）` : '')
@@ -1033,8 +1096,14 @@ function DsmQuickAccessPanel({ compact = false } = {}) {
               + (row.ago ? ` · ${row.ago}` : '')
               + '（点击跳转）'}
             onClick={() => jump(row)}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter' && e.key !== ' ') return
+              e.preventDefault()
+              jump(row)
+            }}
           >
             {(row.badges || []).map((b) => <span key={b} className="dsm-qa-badge">{b}</span>)}
+            {renderJobsBadge(row)}
             <span className="dsm-qa-row-t">{row.title || shortId(row.sessionId)}</span>
             {row.subagentCount > 0 && (
               <span className="dsm-qa-kids" title={`${row.subagentCount} 个子代理已折叠在父会话下`}>
@@ -1043,7 +1112,9 @@ function DsmQuickAccessPanel({ compact = false } = {}) {
             )}
             {row.workspaceTitle && <span className="dsm-qa-ws">{row.workspaceTitle}</span>}
             {row.ago && <span className="dsm-qa-ago">{row.ago}</span>}
-          </button>
+          </div>
+          {renderJobList(row)}
+          </React.Fragment>
         ))}
       </div>
     )
@@ -1114,23 +1185,32 @@ function DsmQuickAccessPanel({ compact = false } = {}) {
             {label}（{list.length}）
           </button>
           {!off && list.map((row) => (
-            <button
-              key={row.sessionId}
-              type="button"
+            <React.Fragment key={row.sessionId}>
+            <div
+              role="button"
+              tabIndex={0}
               className="dsm-qa-row"
               title={(row.title || row.sessionId)
                 + (row.subagentCount ? `（含 ${row.subagentCount} 个子代理，已折叠）` : '')
                 + '（点击跳转）'}
               onClick={() => jump(row)}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter' && e.key !== ' ') return
+                e.preventDefault()
+                jump(row)
+              }}
             >
               <span className="dsm-qa-dot" style={{ background: color }} />
+              {renderJobsBadge(row)}
               <span className="dsm-qa-row-t">{row.title || shortId(row.sessionId)}</span>
               {row.subagentCount > 0 && (
                 <span className="dsm-qa-kids" title={`${row.subagentCount} 个子代理已折叠在父会话下`}>
                   ▸ {row.subagentCount} 子代理
                 </span>
               )}
-            </button>
+            </div>
+            {renderJobList(row)}
+            </React.Fragment>
           ))}
         </div>
         )
@@ -6243,7 +6323,7 @@ export function apply(ctx) {
   // 同一能力也尝试注册为客户端 cordis 服务 'lyinSessions'（可用则用）。
   try {
     const api = {
-      version: '3.14.0',
+      version: '3.14.1',
       openSession(id) {
         const target = id === null || id === undefined ? '' : String(id)
         if (!target) return false
