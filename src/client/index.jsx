@@ -151,10 +151,10 @@ body[data-ds-dark-theme] .archv{color-scheme:dark}
 .dsm-qa-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid rgba(127,127,127,.16)}
 .dsm-qa-title{font-size:13px;font-weight:600;letter-spacing:.2px}
 .dsm-qa-panel .mv-sheet-close{color:rgba(241,239,232,.6)}
-.dsm-qa-group{margin-top:10px}
+.dsm-qa-group{margin-top:10px;min-width:0}
 .dsm-qa-group-t{font-size:11px;opacity:.65;margin-bottom:6px;display:flex;align-items:center;gap:6px;text-transform:uppercase;letter-spacing:.4px}
 .dsm-qa-dot{width:8px;height:8px;border-radius:50%;flex:none;display:inline-block}
-.dsm-qa-row{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:7px 10px;border:none;background:0 0;color:inherit;font-size:12.5px;border-radius:9px;cursor:pointer;transition:background .12s ease}
+.dsm-qa-row{display:flex;align-items:center;gap:10px;width:100%;min-width:0;box-sizing:border-box;text-align:left;padding:7px 10px;border:none;background:0 0;color:inherit;font-size:12.5px;border-radius:9px;cursor:pointer;transition:background .12s ease}
 .dsm-qa-row:hover{background:rgba(255,255,255,.08)}
 .dsm-qa-row:active{background:rgba(255,255,255,.12)}
 .dsm-qa-row:focus-visible{outline:1px solid var(--dsw-alias-state-business-primary,#5B8DEF);outline-offset:-1px}
@@ -176,12 +176,12 @@ body[data-ds-dark-theme] .archv{color-scheme:dark}
 .dsm-qa-ws{flex:none;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;opacity:.45}
 .dsm-qa-ago{margin-left:auto;flex:none;font-size:11px;opacity:.5;white-space:nowrap}
 /* v3.14.1 面板里的后台任务：行首小三角 + 就地展开的「任务名 + 已经跑了多久」。 */
-.dsm-qa-jobs-t{flex:none;display:inline-flex;align-items:center;padding:0 3px;border-radius:5px;font-size:10px;font-weight:700;line-height:14px;letter-spacing:.4px;color:var(--dsw-alias-state-warn-primary,#EAB308);cursor:pointer;white-space:nowrap}
+.dsm-qa-jobs-t{flex:none;appearance:none;display:inline-flex;align-items:center;padding:0 4px;border:none;border-radius:6px;background:transparent;color:var(--dsw-alias-state-warn-primary,#EAB308);font:inherit;font-size:10px;font-weight:700;line-height:15px;letter-spacing:.5px;cursor:pointer;white-space:nowrap}
 .dsm-qa-jobs-t:hover{background:color-mix(in srgb,var(--dsw-alias-state-warn-primary,#EAB308) 16%,transparent)}
 .dsm-qa-jobs-t:focus-visible{outline:1px solid var(--dsw-alias-state-warn-primary,#EAB308);outline-offset:1px}
-.dsm-qa-jobs{margin:1px 0 3px 14px;padding:2px 0 2px 9px;border-left:1px solid rgba(127,127,127,.25);display:flex;flex-direction:column;gap:2px}
+.dsm-qa-jobs{margin:1px 0 3px 14px;padding:2px 0 2px 9px;border-left:1px solid rgba(127,127,127,.25);display:flex;flex-direction:column;gap:2px;min-width:0;max-width:100%;overflow:hidden}
 .dsm-qa-job{display:flex;align-items:center;gap:8px;padding:2px 4px;font-size:11.5px;opacity:.72;min-width:0}
-.dsm-qa-job-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dsm-qa-job-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dsm-qa-job-age{margin-left:auto;flex:none;font-size:10.5px;opacity:.75;font-variant-numeric:tabular-nums;white-space:nowrap}
 .dsm-qa-job-more{opacity:.45;font-size:10.5px}
 .dsm-qa-rail .dsm-qa-jobs{margin-left:11px}
@@ -199,7 +199,7 @@ body[data-ds-dark-theme] .archv{color-scheme:dark}
 /* v0.5.3 滚动：分区变多后面板可能比容器还高，两个形态各自成为滚动容器。
    max-height:100% 只在宿主给定了容器高度时生效——宿主若本来就是整页滚动，
    这条不产生任何变化（不会出现「滚动条里还有滚动条」的并排双条）。 */
-.dsm-qa-main{padding:18px 22px;max-width:var(--dsmqa-width,760px);margin:0 auto;font-size:13px;color:var(--dsmqa-fg,#F1EFE8);max-height:100%;overflow-y:auto}
+.dsm-qa-main{padding:18px 22px;box-sizing:border-box;width:100%;max-width:var(--dsmqa-width,760px);margin:0 auto;font-size:13px;color:var(--dsmqa-fg,#F1EFE8);max-height:100%;overflow-y:auto}
 .dsm-qa-main-head{display:flex;align-items:baseline;gap:12px;margin-bottom:14px}
 .dsm-qa-main-title{font-size:16px;font-weight:700;letter-spacing:.3px}
 .dsm-qa-main-count{font-size:12px;opacity:.6}
@@ -208,7 +208,7 @@ body[data-ds-dark-theme] .archv{color-scheme:dark}
 .dsm-qa-main .dsm-qa-row{padding:9px 12px;font-size:13px}
 /* v0.3.0 右侧栏形态：窄布局（右栏 ~320px），去大内边距、行更紧凑。
    v0.5.3：同样自成滚动容器（右栏高度有限，分区多了必须能滚）。 */
-.dsm-qa-rail{padding:10px 12px;max-width:none;margin:0;font-size:12.5px;color:var(--dsmqa-fg,#F1EFE8);max-height:100%;overflow-y:auto}
+.dsm-qa-rail{padding:10px 12px;box-sizing:border-box;width:100%;max-width:none;margin:0;font-size:12.5px;color:var(--dsmqa-fg,#F1EFE8);max-height:100%;overflow-y:auto}
 .dsm-qa-rail .dsm-qa-main-head{margin-bottom:8px;gap:8px}
 .dsm-qa-rail .dsm-qa-main-title{font-size:13px;font-weight:600}
 .dsm-qa-rail .dsm-qa-main-count{font-size:11px;opacity:.6}
@@ -6323,7 +6323,7 @@ export function apply(ctx) {
   // 同一能力也尝试注册为客户端 cordis 服务 'lyinSessions'（可用则用）。
   try {
     const api = {
-      version: '3.14.1',
+      version: '3.14.2',
       openSession(id) {
         const target = id === null || id === undefined ? '' : String(id)
         if (!target) return false
