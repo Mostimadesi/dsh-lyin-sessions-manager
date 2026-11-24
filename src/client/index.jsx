@@ -297,6 +297,33 @@ body[data-ds-dark-theme] .archv{color-scheme:dark}
 .skill-broken{font-size:11px}
 .skill-broken summary{cursor:pointer}
 .skill-broken-row{padding-left:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* v3.15.0 模型路由：候选链是横排的，每一步都可能很长，所以每一环都得能缩。
+   否则一个长模型名会把整个 sheet 顶宽（与 v3.14.2 面板那次的坑同一个）。 */
+.router-row{flex-wrap:wrap}
+.router-id{font-weight:400;color:var(--dsw-alias-label-tertiary)}
+.router-chain{display:flex;flex-wrap:wrap;align-items:center;gap:2px 4px;white-space:normal}
+.router-hop{display:inline-flex;align-items:center;gap:2px;min-width:0}
+.router-hop-t{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:190px}
+.router-arrow{color:var(--dsw-alias-label-tertiary);opacity:.7}
+.router-hop-acts{display:inline-flex;gap:0}
+.router-mini{appearance:none;flex:none;padding:0 3px;border:none;border-radius:4px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:10px;line-height:15px;cursor:pointer}
+.router-mini:hover:not(:disabled){background:var(--dsw-alias-fill-elevated)}
+.router-mini:disabled{opacity:.3;cursor:default}
+.router-over{margin-left:2px;color:var(--dsw-alias-label-tertiary);white-space:nowrap}
+.router-acts{display:flex;flex:none;gap:6px}
+.router-acts .archv-btn{padding:0 9px;font-size:11.5px}
+.router-del:hover:not(:disabled){color:var(--dsw-alias-state-error-primary);border-color:var(--dsw-alias-state-error-primary)}
+.router-edit{flex:1 1 100%;display:flex;flex-direction:column;gap:6px;padding:8px 0 2px}
+.router-edit-foot{display:flex;justify-content:flex-end;gap:6px}
+.router-new{margin-top:8px;padding-top:8px;border-top:1px solid var(--dsw-alias-border-l2)}
+.router-tier{display:inline-block;padding:0 4px;border-radius:4px;font-size:10px;font-weight:600;background:var(--dsw-alias-fill-elevated);color:var(--dsw-alias-label-secondary)}
+.router-tier-heavy{color:var(--dsw-alias-state-warn-primary,#EAB308)}
+.router-warn{margin-left:6px;padding:0 4px;border-radius:4px;font-size:10px;color:var(--dsw-alias-state-error-primary);background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 14%,transparent)}
+.mv-row-inline{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.mv-inline-label{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--dsw-alias-label-secondary)}
+.mv-inline-label input[type="number"]{width:58px;min-height:26px;padding:0 6px;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);font-size:11.5px}
+.mv-inline-label input[type="text"],.mv-inline-label textarea{width:100%;min-height:26px;padding:4px 8px;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);font-size:11.5px;font-family:var(--dsm-font-mono,ui-monospace,SFMono-Regular,Menlo,monospace);resize:vertical}
+.router-edit .mv-inline-label{display:flex;flex-direction:column;align-items:stretch;gap:4px}
 .mv-seg{display:flex;gap:2px;padding:2px;background:var(--dsw-alias-fill-elevated);border:1px solid var(--dsw-alias-border-l2);border-radius:var(--dsm-radius-sheet);width:100%}
 .mv-segbtn{appearance:none;flex:1;min-height:30px;padding:0 12px;border:none;background:transparent;color:var(--dsw-alias-label-secondary);border-radius:8px;font-size:12px;font-weight:500;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px}
 .mv-segbtn:hover:not(:disabled){color:var(--dsw-alias-label-primary)}
@@ -1597,6 +1624,19 @@ function SessionPanel({ workspacesSvc }) {
   const [skillNote, setSkillNote] = useState('')
   const [skillImportRoot, setSkillImportRoot] = useState('')
   const skillFileRef = useRef(null)
+  // v3.15.0 模型路由：读写 llm-router / subagent-router 两个插件的 settings.json。
+  // 与 MCP / profile 那类不同，它们靠 mtime 指纹 5 秒轮询，改完不用重启。
+  // `routerTab` 是同一个弹层里的两个分区：'llm' | 'subagent'。
+  const [routerOpen, setRouterOpen] = useState(false)
+  const [routerTab, setRouterTab] = useState('llm')
+  const [routerSnap, setRouterSnap] = useState(null)
+  const [routerBusy, setRouterBusy] = useState(false)
+  const [routerErr, setRouterErr] = useState('')
+  const [routerNote, setRouterNote] = useState('')
+  // 正在展开编辑的路由 id / 候选 id（一次只开一个，弹层已经够拥挤了）。
+  const [routerEdit, setRouterEdit] = useState('')
+  const [routerDraft, setRouterDraft] = useState({ id: '', name: '', chain: '' })
+  const [routerNew, setRouterNew] = useState({ open: false, id: '', name: '', chain: '' })
   // v0.2.4 问题3：外观偏好存 localStorage（非响应式），write 后以此 tick 强制
   // sheet 重读最新值，否则 select/滑杆显示卡在旧值。
   const [qaStyleTick, setQaStyleTick] = useState(0)
@@ -2590,6 +2630,34 @@ function SessionPanel({ workspacesSvc }) {
       .catch((e) => { setWsArchBusy(false); setError(String((e && e.message) || e)) })
   }
 
+  // ---- v3.15.0 模型路由。三个入口共用同一个 apply 通道：
+  // 所有校验在 host 侧 router-core.js（两个插件 normalizer 的镜像），
+  // 这里只负责把「用户点了一个按钮」翻译成 { target, op }。
+  const applyRouter = (target, op, doneMsg) => {
+    if (routerBusy) return
+    setRouterBusy(true)
+    setRouterErr('')
+    postJSON('/archived-sessions/router/apply', { target, op })
+      .then((r) => {
+        setRouterBusy(false)
+        if (r && r.snapshot) setRouterSnap(r.snapshot)
+        setRouterNote(r && r.changed ? doneMsg : '没有变化')
+      })
+      .catch((e) => { setRouterBusy(false); setRouterErr(String((e && e.message) || e)) })
+  }
+
+  // 链文本框 ⇄ 数组：一行一个 `provider/model[@effort]`，解析全交给 host。
+  const splitChain = (text) => String(text || '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
+
+  const openRouterEdit = (route) => {
+    setRouterEdit(route.id)
+    setRouterDraft({
+      id: route.id,
+      name: route.name || '',
+      chain: route.chain.map((c) => (c.reasoningEffort ? `${c.provider}/${c.model}@${c.reasoningEffort}` : `${c.provider}/${c.model}`)).join('\n'),
+    })
+  }
+
   const restoreTrash = (sid) => {
     if (trashBusy) return
     setTrashBusy(sid)
@@ -2997,6 +3065,28 @@ function SessionPanel({ workspacesSvc }) {
                     .finally(() => setSkillBusy(false))
                 }}
               >Skill 列表{skillData && Array.isArray(skillData.skills) ? ` (${skillData.skills.length})` : ''}</button>
+              {/* v3.15.0 模型路由：两个插件的 settings.json 都靠指纹轮询，改完 5 秒生效、
+                  不用重启 —— 与左边两个按钮（改 profile / 改 SKILL.md）语义不同。 */}
+              <button
+                type="button"
+                className="archv-btn"
+                aria-expanded={routerOpen}
+                title="编辑 llm-router 的候选链与 subagent-router 的子代理候选（改完 5 秒内自生效，不用重启）"
+                onClick={() => {
+                  const next = !routerOpen
+                  setRouterOpen(next)
+                  if (!next) return
+                  setRouterBusy(true)
+                  setRouterErr('')
+                  setRouterNote('')
+                  setRouterEdit('')
+                  setRouterNew({ open: false, id: '', name: '', chain: '' })
+                  postJSON('/archived-sessions/router/snapshot', {})
+                    .then((d) => setRouterSnap(d))
+                    .catch((e) => setRouterErr(String((e && e.message) || e)))
+                    .finally(() => setRouterBusy(false))
+                }}
+              >模型路由{routerSnap && Array.isArray(routerSnap.llm && routerSnap.llm.routes) ? ` (${routerSnap.llm.routes.length})` : ''}</button>
             </div>
           </div>
 
@@ -3127,6 +3217,222 @@ function SessionPanel({ workspacesSvc }) {
               <div className="mcp-note">{mcpNote || '改动写入当前 profile 的 cordis.patch.yml（写入前自动备份为 .bak-mcpui-*），重启 DSH 后生效。'}</div>
             </div>
           )}
+
+          {/* v3.15.0 模型路由 sheet：同一个弹层两个分区（LLM 路由 / 子代理候选）。
+              数据取自 /archived-sessions/router/snapshot；每次编辑走 /router/apply
+              并在响应里带回最新 snapshot，所以不用另外 refresh。
+              文案要反复强调「不用重启」——这两行旁边的按钮（MCP / Skill）都需要
+              重启或等下一个 step，混在一起很容易让人以为这里也要。 */}
+          {routerOpen && (() => {
+            const snap = routerSnap || {}
+            const llm = snap.llm || {}
+            const sub = snap.subagent || {}
+            const check = snap.check || { dangling: [], unusedRoutes: [] }
+            const routes = Array.isArray(llm.routes) ? llm.routes : []
+            const cands = Array.isArray(sub.candidates) ? sub.candidates : []
+            const rowBusy = routerBusy
+            return (
+              <div className="mv-sheet" aria-label="模型路由">
+                <div className="mv-sheet-head">
+                  <h3 className="mv-sheet-title">模型路由</h3>
+                  <button type="button" className="mv-sheet-close" aria-label="关闭" onClick={() => setRouterOpen(false)}>×</button>
+                </div>
+                <div className="mv-seg" role="tablist">
+                  <button type="button" role="tab" aria-selected={routerTab === 'llm'} className={'mv-segbtn' + (routerTab === 'llm' ? ' mv-segbtn-on' : '')} onClick={() => { setRouterTab('llm'); setRouterEdit('') }}>LLM 路由（{routes.length}）</button>
+                  <button type="button" role="tab" aria-selected={routerTab === 'subagent'} className={'mv-segbtn' + (routerTab === 'subagent' ? ' mv-segbtn-on' : '')} onClick={() => { setRouterTab('subagent'); setRouterEdit('') }}>子代理候选（{cands.length}）</button>
+                </div>
+                {routerErr ? <div className="mcp-note mcp-err">{routerErr}</div> : null}
+                {!routerSnap ? (
+                  <div className="mcp-note">{routerBusy ? '读取中…' : '尚未读取。'}</div>
+                ) : routerTab === 'llm' ? (
+                  <>
+                    {llm.missing ? <div className="mcp-note">没读到 {llm.file}：要么没装 llm-router，要么它还没写过配置。下面的改动会新建这个文件。</div> : null}
+                    <div className="mv-field">
+                      <label className="mv-field-label" htmlFor="dsm-router-enabled">总开关</label>
+                      <div className="mv-row-inline">
+                        <button
+                          type="button"
+                          id="dsm-router-enabled"
+                          className={'archv-btn' + (llm.enabled !== false ? ' archv-go' : '')}
+                          aria-pressed={llm.enabled !== false}
+                          disabled={rowBusy}
+                          onClick={() => applyRouter('llm', { action: 'set-enabled', enabled: llm.enabled === false }, llm.enabled === false ? '已启用路由' : '已停用路由')}
+                        >{llm.enabled !== false ? '已启用' : '已停用'}</button>
+                        <select
+                          value={llm.announce || 'switch'}
+                          disabled={rowBusy}
+                          aria-label="换候选时的提示方式"
+                          onChange={(e) => applyRouter('llm', { action: 'set-announce', mode: e.target.value }, '已改提示方式')}
+                        >
+                          <option value="off">不提示</option>
+                          <option value="switch">换候选时提示</option>
+                          <option value="always">每次都提示</option>
+                        </select>
+                        <select
+                          value={llm.defaultStrategy || 'fallback'}
+                          disabled={rowBusy}
+                          aria-label="默认策略"
+                          onChange={(e) => applyRouter('llm', { action: 'set-default-strategy', strategy: e.target.value }, '已改默认策略')}
+                        >
+                          <option value="fallback">fallback（顺序重试）</option>
+                          <option value="round-robin">round-robin（轮流）</option>
+                        </select>
+                        <label className="mv-inline-label">粘性
+                          <input
+                            type="number"
+                            min="1"
+                            max="100"
+                            value={llm.stickyLimit == null ? 1 : llm.stickyLimit}
+                            disabled={rowBusy}
+                            aria-label="全局粘性次数"
+                            onChange={(e) => applyRouter('llm', { action: 'set-global-sticky', stickyLimit: Number(e.target.value) }, '已改全局粘性')}
+                          />
+                        </label>
+                      </div>
+                    </div>
+                    {routes.length === 0 ? (
+                      <div className="mcp-note">还没有任何路由组。新建一条就能在模型下拉框里看到它。</div>
+                    ) : (
+                      <div className="mcp-list">
+                        {routes.map((route, at) => (
+                          <div className="mcp-row router-row" key={route.id}>
+                            <div className="mcp-meta">
+                              <div className="mcp-name">{route.name || route.id}{route.name && route.name !== route.id ? <span className="router-id"> · {route.id}</span> : null}</div>
+                              <div className="mcp-sub router-chain">
+                                {route.chain.map((c, i) => (
+                                  <span key={`${route.id}-${i}`} className="router-hop">
+                                    {i > 0 ? <span className="router-arrow">→</span> : null}
+                                    <span className="router-hop-t">{c.provider}/{c.model}{c.reasoningEffort ? `@${c.reasoningEffort}` : ''}</span>
+                                    {route.chain.length > 1 ? (
+                                      <span className="router-hop-acts">
+                                        <button type="button" className="router-mini" aria-label={`把第 ${i + 1} 个候选上移`} disabled={rowBusy || i === 0} onClick={() => applyRouter('llm', { action: 'move-candidate', id: route.id, from: i + 1, to: i }, '已上移')}>↑</button>
+                                        <button type="button" className="router-mini" aria-label={`把第 ${i + 1} 个候选下移`} disabled={rowBusy || i === route.chain.length - 1} onClick={() => applyRouter('llm', { action: 'move-candidate', id: route.id, from: i + 1, to: i + 2 }, '已下移')}>↓</button>
+                                      </span>
+                                    ) : null}
+                                  </span>
+                                ))}
+                                <span className="router-over">{route.strategy || llm.defaultStrategy || 'fallback'} · 粘性 {route.stickyLimit}{route.announce ? ` · ${route.announce}` : ''}</span>
+                              </div>
+                            </div>
+                            <div className="router-acts">
+                              <button type="button" className="archv-btn" disabled={rowBusy} onClick={() => (routerEdit === route.id ? setRouterEdit('') : openRouterEdit(route))}>{routerEdit === route.id ? '收起' : '编辑'}</button>
+                              <button type="button" className="archv-btn router-del" disabled={rowBusy} onClick={() => applyRouter('llm', { action: 'remove-route', id: route.id }, `已删除 ${route.id}`)}>删除</button>
+                            </div>
+                            {routerEdit === route.id ? (
+                              <div className="router-edit">
+                                <label className="mv-inline-label">显示名
+                                  <input type="text" value={routerDraft.name} disabled={rowBusy} onChange={(e) => setRouterDraft({ ...routerDraft, name: e.target.value })} />
+                                </label>
+                                <label className="mv-inline-label">候选（一行一个 provider/model，可选 @effort）
+                                  <textarea rows="4" value={routerDraft.chain} disabled={rowBusy} spellCheck={false} onChange={(e) => setRouterDraft({ ...routerDraft, chain: e.target.value })} />
+                                </label>
+                                <div className="router-edit-foot">
+                                  <button type="button" className="archv-btn" disabled={rowBusy} onClick={() => setRouterEdit('')}>取消</button>
+                                  <button
+                                    type="button"
+                                    className="archv-btn archv-go"
+                                    disabled={rowBusy}
+                                    onClick={() => applyRouter('llm', { action: 'update-route', id: route.id, patch: { name: routerDraft.name, chain: splitChain(routerDraft.chain) } }, '已保存')}
+                                  >保存</button>
+                                </div>
+                              </div>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {routerNew.open ? (
+                      <div className="router-new">
+                        <div className="router-edit">
+                          <label className="mv-inline-label">id（模型下拉框里显示的名字，不能有空格与斜杠）
+                            <input type="text" value={routerNew.id} disabled={rowBusy} placeholder="例如 GLM5.3" onChange={(e) => setRouterNew({ ...routerNew, id: e.target.value })} />
+                          </label>
+                          <label className="mv-inline-label">显示名（可留空）
+                            <input type="text" value={routerNew.name} disabled={rowBusy} onChange={(e) => setRouterNew({ ...routerNew, name: e.target.value })} />
+                          </label>
+                          <label className="mv-inline-label">候选（一行一个 provider/model）
+                            <textarea rows="4" value={routerNew.chain} disabled={rowBusy} spellCheck={false} placeholder={'buddy/glm-5.3\ntrae/glm-5.3'} onChange={(e) => setRouterNew({ ...routerNew, chain: e.target.value })} />
+                          </label>
+                          <div className="router-edit-foot">
+                            <button type="button" className="archv-btn" disabled={rowBusy} onClick={() => setRouterNew({ open: false, id: '', name: '', chain: '' })}>取消</button>
+                            <button
+                              type="button"
+                              className="archv-btn archv-go"
+                              disabled={rowBusy}
+                              onClick={() => applyRouter('llm', { action: 'add-route', id: routerNew.id, name: routerNew.name, chain: splitChain(routerNew.chain) }, `已新建 ${routerNew.id}`)}
+                            >新建</button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mv-foot">
+                        <button type="button" className="archv-btn" disabled={rowBusy} onClick={() => setRouterNew({ open: true, id: '', name: '', chain: '' })}>新建路由组</button>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {sub.missing ? <div className="mcp-note">没读到 {sub.file}：要么没装 subagent-router，要么它还没写过配置。</div> : null}
+                    <div className="mv-field">
+                      <label className="mv-field-label">总开关</label>
+                      <div className="mv-row-inline">
+                        <button
+                          type="button"
+                          className={'archv-btn' + (sub.enabled !== false ? ' archv-go' : '')}
+                          aria-pressed={sub.enabled !== false}
+                          disabled={rowBusy}
+                          onClick={() => applyRouter('subagent', { action: 'set-enabled', enabled: sub.enabled === false }, sub.enabled === false ? '已启用' : '已停用')}
+                        >{sub.enabled !== false ? '已启用' : '已停用'}</button>
+                        <button
+                          type="button"
+                          className={'archv-btn' + (sub.guidance !== false ? ' archv-go' : '')}
+                          aria-pressed={sub.guidance !== false}
+                          disabled={rowBusy}
+                          onClick={() => applyRouter('subagent', { action: 'set-guidance', guidance: sub.guidance === false }, sub.guidance === false ? '已开启引导' : '已关闭引导')}
+                        >引导文案{sub.guidance !== false ? '开' : '关'}</button>
+                        <button type="button" className="archv-btn" disabled={rowBusy} onClick={() => applyRouter('subagent', { action: 'reload-from-router' }, '已把 LLM 路由组补进来')}>从 LLM 路由补全</button>
+                      </div>
+                    </div>
+                    {sub.note ? <div className="mcp-note">备注：{sub.note}</div> : null}
+                    <div className="mcp-list">
+                      {cands.map((c, at) => {
+                        const id = `${c.provider}/${c.model}`
+                        const dangling = c.provider === 'llm-router' && check.dangling.includes(id)
+                        return (
+                          <div className="mcp-row router-row" key={id}>
+                            <div className="mcp-meta">
+                              <div className="mcp-name">{c.label || c.model}<span className="router-id"> · {id}</span></div>
+                              <div className="mcp-sub">
+                                <span className={'router-tier router-tier-' + (c.tier || 'light')}>{c.tier === 'heavy' ? '重' : '轻'}</span>
+                                {dangling ? <span className="router-warn">路由组已不存在</span> : null}
+                                <span style={{ marginLeft: 8 }}>{id}</span>
+                              </div>
+                            </div>
+                            <div className="router-acts">
+                              <button type="button" className="router-mini" aria-label="上移" disabled={rowBusy || at === 0} onClick={() => applyRouter('subagent', { action: 'move-candidate', from: at + 1, to: at }, '已上移')}>↑</button>
+                              <button type="button" className="router-mini" aria-label="下移" disabled={rowBusy || at === cands.length - 1} onClick={() => applyRouter('subagent', { action: 'move-candidate', from: at + 1, to: at + 2 }, '已下移')}>↓</button>
+                              <button
+                                type="button"
+                                className="archv-btn"
+                                disabled={rowBusy}
+                                aria-pressed={c.tier === 'heavy'}
+                                onClick={() => applyRouter('subagent', { action: 'update-candidate', provider: c.provider, model: c.model, patch: { tier: c.tier === 'heavy' ? 'light' : 'heavy' } }, '已改档位')}
+                              >{c.tier === 'heavy' ? '重' : '轻'}</button>
+                              <button type="button" className="archv-btn router-del" disabled={rowBusy} onClick={() => applyRouter('subagent', { action: 'remove-candidate', provider: c.provider, model: c.model }, `已删除 ${c.model}`)}>删除</button>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                    {check.unusedRoutes && check.unusedRoutes.length > 0 ? (
+                      <div className="mcp-note">没被子代理候选引用的路由组：{check.unusedRoutes.join('、')}（不影响使用，只是提醒）</div>
+                    ) : null}
+                  </>
+                )}
+                <div className="mcp-note">{routerNote || '这些改动写的是两个插件各自的 settings.json（写入前自动备份为 .bak-routerui-*）。它们都靠文件修改时间 5 秒轮询，所以改完最多 5 秒自己生效——不用重启 DSH，也不影响 /router、/subagent-router 与 llm_router 工具继续使用。'}</div>
+              </div>
+            )
+          })()}
 
           {/* v0.6.1 skill 列表 sheet：三态开关写 frontmatter（服务端先落 .bak-skill-* 备份），
               宿主 watch 到文件变化后下一次 agent step 即生效，不需要重启。
@@ -6323,7 +6629,7 @@ export function apply(ctx) {
   // 同一能力也尝试注册为客户端 cordis 服务 'lyinSessions'（可用则用）。
   try {
     const api = {
-      version: '3.14.3',
+      version: '3.15.0',
       openSession(id) {
         const target = id === null || id === undefined ? '' : String(id)
         if (!target) return false

@@ -44,6 +44,7 @@ import { pathOwnsSession } from './path-guard.js'
 import { purgeSessionArtifacts, moveSessionToCwd } from './handle-era-ops.js'
 import { classifyLineage, emptyScanCandidate, isEmptyEventTypes, subagentDescendantsOf, EMPTY_DECODE_LIMIT } from './lineage.js'
 import { PATCH_FILE_NAME, parsePatchRows, togglePatchRow, resolveProfileDir } from './mcp-rows.js'
+import { createRouterStore } from './router-store.js'
 import {
   SKILL_MODES,
   SKILL_MODE_LABEL,
@@ -720,6 +721,9 @@ export function apply(ctx) {
   // Archived workspaces (schema v1) — visibility only: hiding a whole workspace
   // must never mutate the archive state of the conversations inside it.
   const workspaceArchive = createWorkspaceArchiveStore()
+  // v3.15.0 模型路由：读写本机两个路由插件的 settings.json。它们都靠 mtime
+  // 指纹 5 秒轮询，改文件即生效 —— 与 MCP / profile 那类「必须重启」不同。
+  const routerStore = createRouterStore({ log: (line) => { void appendDebugLog(STATE_DIR, [line]).catch(() => {}) } })
   // 启动清扫：进程在「写临时文件 → rename」之间被杀会留下 .<name>-<pid>-<ts>.tmp
   // 孤儿（实测一次累积 153 个）。这里把 1 小时前的旧临时文件收掉，不碰正在写的。
   sweepStaleStateTemps([STATE_DIR, TRASH_DIR], {}).catch(() => {})
@@ -3461,6 +3465,48 @@ export function apply(ctx) {
           })
         } catch (e) {
           json(res, { ok: false, error: String((e && e.message) || e) }, errorStatus(e))
+        }
+      },
+    })
+
+    // ---- 模型路由（v3.15.0）----------------------------------------------
+    // 本机两个插件把「模型路由」落成两个独立 JSON：
+    //   ~/.dsh/llm-router/settings.json       跨 provider 的候选链
+    //   ~/.dsh/subagent-router/settings.json  派给子代理的候选清单 + tier
+    // 它们都靠 mtime/size 指纹 5 秒轮询，改文件即生效，所以这里固定带
+    // needsRestart: false —— 与 MCP / profile 那类「必须重启」完全相反。
+    // 原入口（/router、llm_router 工具、/subagent-router）全部保留，三边写
+    // 同一个文件；它们都是「整表替换」，所以界面里注明了别同时改。
+    registerRoute({
+      kind: 'exact',
+      path: '/archived-sessions/router/snapshot',
+      handler: async (req, res) => {
+        try {
+          json(res, { ok: true, ...routerStore.snapshot() })
+        } catch (e) {
+          json(res, { ok: false, code: e && e.code, error: String((e && e.message) || e) }, errorStatus(e))
+        }
+      },
+    })
+
+    // body: { target: 'llm' | 'subagent', op: { action: string, ... } }
+    // 校验全部在 router-core.js（两个插件 normalizer 的镜像）；抛出的
+    // RouterError 自带 status 400，其余异常走 500。
+    registerRoute({
+      kind: 'exact',
+      path: '/archived-sessions/router/apply',
+      handler: async (req, res) => {
+        try {
+          const body = await readJsonBody(req)
+          const target = body && typeof body.target === 'string' ? body.target.trim() : ''
+          const op = body && body.op && typeof body.op === 'object' ? body.op : null
+          if ((target !== 'llm' && target !== 'subagent') || op === null) {
+            return json(res, { ok: false, code: 'DSM_ROUTER_BAD_INPUT', error: "body: { target: 'llm'|'subagent', op: { action, ... } }" }, 400)
+          }
+          const out = routerStore.apply(target, op)
+          json(res, { ok: true, ...out, snapshot: routerStore.snapshot() })
+        } catch (e) {
+          json(res, { ok: false, code: e && e.code, error: String((e && e.message) || e) }, errorStatus(e))
         }
       },
     })

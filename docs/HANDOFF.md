@@ -3,7 +3,7 @@
 > 写给「接手后续维护的新会话 / 新维护者」。目标是让你在不读 5000 行源码的前提下，
 > 20 分钟内能改一行、构建、验证、回滚。
 >
-> 最后更新：2026-11-23（v3.14.3：把 v3.14.2 给 `.dsm-qa-main` / `.dsm-qa-rail` 加的 `width:100%` 删掉——它解决了「被内容顶宽」，却把面板变成「永远铺满」，用户 m03562 反馈不自然。改回 `min-width:0` + `max-width` + `margin:0 auto`，块级默认行为接管；v3.14.2：面板里的小三角改成和侧栏同款——之前是浏览器给 button 的默认灰底方框，和侧栏的橙色 ▸ 不是一个东西；同时给展开列表补 min-width:0 / max-width:100% / overflow:hidden，长任务名不再把整个面板横向撑开。v3.14.1：后台任务从侧栏 DOM 挪进「进行中的会话」面板——v3.14.0 挂错了地方，用户日常看的是插件自己的面板，侧栏会话行里有三角而面板里没有；面板行因此由 button 改为 div role=button，好让行内的三角是真正可聚焦的 button；v3.14.0：侧栏加「后台任务」—— 回合结束后会话留下的 job 可能还在跑，此时那一行看起来什么都没干。现在给这样的会话在状态点后挂一个「▸ N」小三角，点开就地列出任务名与运行时长；并且只要作业没收尾，即便用户已经点进会话「已读」，该会话仍留在「刚完成」里（否则就回到用户抱怨的那个局面：找不到是谁在后台占资源）。数据取自宿主 `jobs` + `agents` 两个服务，宿主没有它们时整个特性静默不存在；v3.13.3：修掉「修了但空隙还在」——`dsmFitPanel` 里负 margin 一旦生效，`el.top - ar.top` 恒为 0，每次重算都把自己抹平；改为先加回上次已吃掉的 `--dsmqa-gap-top` 得到自然位置再决定吃多少（幂等）。同时跟随态把面板的 `padding-top` 归零、吸顶条的负 `margin-top` 归零，顶条直接贴住面板上沿。v3.13.2：筛选框搬进吸顶条内部一起吸顶、顶部那截空隙用 `--dsmqa-gap-top` 负 margin 吃掉（顺带增强 `panel:fit` 日志：`pt=/st=/stTop=/sh=/chh=/stv=`）；v3.13.1：修正胶囊材质的「应用范围」——吸顶条不再是实色深条、面板铺满整块可用区域而不是只包住内容、跟随态默认默认铺满宽度而非 760px 窄卡；v3.13.0 是快捷面板外观可以「跟随歌词胶囊」——读 netease-lyrics 的 localStorage 与事件，把它的 7 种胶囊样式映射成本插件的 CSS 变量；v3.12.0 是 debug.log 轮转、已标记拆三小行、工作区筛选哨兵、工作区归档（只做可见性）、`check:schema` 上游格式哨兵，并手工卸载了 `dsh-mcp-manager`。能力范围 = v0.5.5 MCP 开关 + v0.6.1 skill 管理 + v0.6.2/v0.6.3 缺陷修复 + v3.12.0 工作区归档 + v3.13.0/3.13.1/3.13.2/3.13.3 胶囊联动）
+> 最后更新：2026-11-24（v3.15.0：模型路由面板（维护栏右侧第三个按钮，`mv-sheet` 两个分区），读写本机两个路由插件的 `settings.json`：`~/.dsh/llm-router/settings.json`（跨 provider 的候选链）与 `~/.dsh/subagent-router/settings.json`（派给子代理的候选清单 + tier）。两者都靠 mtime/size 指纹 5 秒轮询，所以改完最多 5 秒自生效，`needsRestart` 恒为 false —— 与隔壁两个按钮（MCP 改 profile、Skill 改 SKILL.md）语义完全不同。校验层 `src/router-core.js` 是那两个插件 normalizer 的逐条镜像（候选解析、id 白名单、tier 回落 light、写回走 normalize 所以未知键会被丢掉），编辑拒绝统一抛 `RouterError`（status 400，界面直接显示原文）。原入口 `/router`、`llm_router` 工具、`/subagent-router` 全部保留，三边写同一个文件。`src/router-store.js` 只做文件 I/O：读带指纹缓存、写走 `temp + rename` 原子替换并在改前落 `.bak-routerui-<时间戳>`。v3.14.3：把 v3.14.2 给 `.dsm-qa-main` / `.dsm-qa-rail` 加的 `width:100%` 删掉——它解决了「被内容顶宽」，却把面板变成「永远铺满」，用户 m03562 反馈不自然。改回 `min-width:0` + `max-width` + `margin:0 auto`，块级默认行为接管；v3.14.2：面板里的小三角改成和侧栏同款——之前是浏览器给 button 的默认灰底方框，和侧栏的橙色 ▸ 不是一个东西；同时给展开列表补 min-width:0 / max-width:100% / overflow:hidden，长任务名不再把整个面板横向撑开。v3.14.1：后台任务从侧栏 DOM 挪进「进行中的会话」面板——v3.14.0 挂错了地方，用户日常看的是插件自己的面板，侧栏会话行里有三角而面板里没有；面板行因此由 button 改为 div role=button，好让行内的三角是真正可聚焦的 button；v3.14.0：侧栏加「后台任务」—— 回合结束后会话留下的 job 可能还在跑，此时那一行看起来什么都没干。现在给这样的会话在状态点后挂一个「▸ N」小三角，点开就地列出任务名与运行时长；并且只要作业没收尾，即便用户已经点进会话「已读」，该会话仍留在「刚完成」里（否则就回到用户抱怨的那个局面：找不到是谁在后台占资源）。数据取自宿主 `jobs` + `agents` 两个服务，宿主没有它们时整个特性静默不存在；v3.13.3：修掉「修了但空隙还在」——`dsmFitPanel` 里负 margin 一旦生效，`el.top - ar.top` 恒为 0，每次重算都把自己抹平；改为先加回上次已吃掉的 `--dsmqa-gap-top` 得到自然位置再决定吃多少（幂等）。同时跟随态把面板的 `padding-top` 归零、吸顶条的负 `margin-top` 归零，顶条直接贴住面板上沿。v3.13.2：筛选框搬进吸顶条内部一起吸顶、顶部那截空隙用 `--dsmqa-gap-top` 负 margin 吃掉（顺带增强 `panel:fit` 日志：`pt=/st=/stTop=/sh=/chh=/stv=`）；v3.13.1：修正胶囊材质的「应用范围」——吸顶条不再是实色深条、面板铺满整块可用区域而不是只包住内容、跟随态默认默认铺满宽度而非 760px 窄卡；v3.13.0 是快捷面板外观可以「跟随歌词胶囊」——读 netease-lyrics 的 localStorage 与事件，把它的 7 种胶囊样式映射成本插件的 CSS 变量；v3.12.0 是 debug.log 轮转、已标记拆三小行、工作区筛选哨兵、工作区归档（只做可见性）、`check:schema` 上游格式哨兵，并手工卸载了 `dsh-mcp-manager`。能力范围 = v0.5.5 MCP 开关 + v0.6.1 skill 管理 + v0.6.2/v0.6.3 缺陷修复 + v3.12.0 工作区归档 + v3.13.0/3.13.1/3.13.2/3.13.3 胶囊联动）
 
 ---
 
@@ -14,10 +14,10 @@
 | 本机仓库路径 | `D:\DeepSeek Harness\workspace\plugins_helper\session-manager-unified\dsh-lyin-sessions-manager` |
 | 分支 / 远程 | `main`；`origin` = https://github.com/Mostimadesi/dsh-lyin-sessions-manager（公开），`upstream` = TOBYCAI/dsh-sessions-manager |
 | 插件包名 | `dsh-lyin-sessions-manager`（**改包名要同时改** `build.mjs` 的 ModuleLoader banner） |
-| package 版本 | `3.14.3`（上游 3.7.10 → 3.8.0 面板能力 → 3.9.0 加 MCP 开关 → 3.10.0 加 skill 管理 → 3.10.1 维护栏分组 → 3.10.2 评审加固 → 3.10.3 全量自审修复 → 3.11.0 debug.log 轮转 + 已标记拆三行 + 工作区筛选哨兵 → 3.12.0 工作区归档 + `check:schema` → 3.13.0 面板外观跟随歌词胶囊 → 3.13.1 材质铺满面板 + 吸顶条去实色 + 默认铺满宽度 → 3.13.2 筛选框进吸顶条 + 顶部空隙用负 margin 吃掉 → 3.13.3 负 margin 幂等化（否则重算即抹平）+ 顶条贴住面板上沿 → 3.14.0 侧栏「后台任务」小三角 + 就地展开 → 3.14.1 后台任务挪进「进行中的会话」面板 → 3.14.2 三角外观对齐侧栏 + 长任务名不再撑宽面板 → 3.14.3 面板不再强制铺满（删 width:100%）） |
+| package 版本 | `3.15.0`（上游 3.7.10 → 3.8.0 面板能力 → 3.9.0 加 MCP 开关 → 3.10.0 加 skill 管理 → 3.10.1 维护栏分组 → 3.10.2 评审加固 → 3.10.3 全量自审修复 → 3.11.0 debug.log 轮转 + 已标记拆三行 + 工作区筛选哨兵 → 3.12.0 工作区归档 + `check:schema` → 3.13.0 面板外观跟随歌词胶囊 → 3.13.1 材质铺满面板 + 吸顶条去实色 + 默认铺满宽度 → 3.13.2 筛选框进吸顶条 + 顶部空隙用负 margin 吃掉 → 3.13.3 负 margin 幂等化（否则重算即抹平）+ 顶条贴住面板上沿 → 3.14.0 侧栏「后台任务」小三角 + 就地展开 → 3.14.1 后台任务挪进「进行中的会话」面板 → 3.14.2 三角外观对齐侧栏 + 长任务名不再撑宽面板 → 3.14.3 面板不再强制铺满（删 width:100%） → 3.15.0 模型路由面板） |
 | 目标宿主 | DSH **0.2.2-rc.1**（`D:\DeepSeek Harness`，nightly 通道） |
 | 构建 | `npm run build` → 产出 `lib/index.js` + `lib/client.js`（**产物要提交**） |
-| 测试 | `npm test`（= `node scripts/run-tests.mjs`，55 个测试文件 / 561 项，Windows 基线 5 项失败见 §7.2） |
+| 测试 | `npm test`（= `node scripts/run-tests.mjs`，58 个测试文件 / 601 项，Windows 基线 5 项失败见 §7.2） |
 | 产物一致性 | `npm run check:dist`（**必须先 commit 再跑**，它用 `git diff --exit-code -- lib` 判定） |
 | 上游格式哨兵 | `npm run check:schema`（把每份落盘索引的 schemaVersion 钉成表，与 `upstream/main` 逐个比对） |
 | 生效方式 | 纯 `lib/client.js` 改动：**刷新浏览器页面**即可；`lib/index.js`（host）改动：重启 DSH |
@@ -64,6 +64,9 @@ src/
   lineage.js            子代理血缘（origin === 'subagent' && parentSession）
   auto-archive.js       自动归档（本机因缺活动时间实际不生效，见 §10）
   background-jobs.js    后台任务的只读投影（纯逻辑，无 node: 导入）：normalizeJobRow / isActiveJob / activeJobRows / sessionIdsOf / collectBackgroundJobs / jobDurationLabel / jobBadgeText；host 与 client 共用
+  router-core.js        模型路由的纯判定层（v3.15.0，无 node: 导入）：两个路由插件 normalizer 的镜像 +
+                        add/update/remove/move + applyLlmOp/applySubagentOp 分发表 + crossCheck
+  router-store.js       两个 settings.json 的读写（v3.15.0）：指纹缓存、temp+rename 原子写、改前备份
   debug-log.js          debug.log 轮转与上限（v3.11.0：4 MiB × 4 = 16 MiB 足迹）
   workspace-archive-core.js 工作区归档纯逻辑（无 node: 导入，客户端也打包它）
   workspace-archive.js  工作区归档的文件 I/O（workspace-archives.v1.json，tmp+rename 原子写）
@@ -76,7 +79,7 @@ scripts/
   rescue-smoke.mjs      复制真实 v4 日志到临时目录，跑 32 项破坏性矩阵
   check-schema.mjs      上游落盘 schema 哨兵（npm run check:schema，见 §12.1）
   check-session-health.mjs / check-upstream-contract.mjs / compat-runtime.mjs
-tests/                  55 个 *.test.js（node:test），全量 561 项
+tests/                  58 个 *.test.js（node:test），全量 601 项
 docs/
   v01-meta-spec.md      v0.1 元数据层规格
   v01-交付与验证报告.md   四层验证栈的记录
@@ -249,7 +252,7 @@ Select-String -Path "$env:USERPROFILE\.dsh\sessions-manager\debug.log" -Pattern 
 ### 7.1 命令
 
 ```bash
-npm test                         # 全量（55 文件，约 561 项）
+npm test                         # 全量（58 文件，约 601 项）
 node --test tests/xxx.test.js    # 单文件
 node scripts/compat-smoke.mjs 0.2.2-rc.1   # 真实 cordis 加载 41 条路由
 node scripts/rescue-smoke.mjs              # 破坏性矩阵（需真实 ~/.dsh/sessions）
@@ -283,9 +286,10 @@ git stash push -u -q && npm test ; git stash pop   # 在 pristine 状态跑一�
 
 ### 7.3 最近一次全绿记录
 
-- build stamp `3.14.3+38481fe0`（v3.14.3 面板不再强制铺满；v3.14.2 见 `902c53d`，v3.14.1 见 `fe684f5`，v3.14.0 见 `13809ee`，v3.13.3 见 `46d5c8d`）
+- build stamp `3.15.0+47fc506e`（v3.15.0 模型路由面板；v3.14.3 见 `b486448`，v3.14.2 见 `902c53d`，v3.14.1 见 `fe684f5`，v3.14.0 见 `13809ee`，v3.13.3 见 `46d5c8d`）
 - 上一版：build stamp `3.13.3+6ccf65f3`（v3.13.3 负 margin 幂等化 + 顶条贴住面板上沿；v3.13.2 见 `7bd48b3`，v3.13.1 见 `8fd002f`）
-- **561 项 / 556 通过 / 5 失败**（失败集都在 §7.2 那 5 项 Windows 基线里，按测试名对照）——**无新增回归**
+- **601 项 / 595–596 通过 / 5–6 失败**（失败集都在 §7.2 那 5 项 Windows 基线里，按测试名对照；第 6 项是基线里偶尔多跑出来的一条）
+- v3.15.0 新增 `tests/router-core.test.js` 20 项、`tests/router-store.test.js` 14 项、`tests/router-routes.test.js` 6 项——**无新增回归**
 - v3.14.0 新增单测：`tests/background-jobs.test.js` 20 项（owner 过滤、未知状态不当活、排序去重、时长分级、徽标文本）、`tests/background-jobs-routes.test.js` 4 项（分组下发、无服务时不出字段的向后兼容断言、两个服务的异常隔离），全绿
 - v3.13.3 记录：**537 项 / 533–534 通过 / 3–4 失败**
 - v3.13.0 新增单测：`tests/capsule-link.test.js` 17 项（7 种胶囊样式映射、数值夹逼、颜色校验、面板滑杆优先级、未移植样式的近似回落），全绿；v3.13.1 / v3.13.2 都是纯 CSS/UI 调整，无新增用例
@@ -440,6 +444,16 @@ localStorage（浏览器侧）：
 60. **`width:100%` 与 `min-width:0` 解决的是两个相反的问题，别混用**。v3.14.2 想解决「长任务名把面板顶宽」，给 `.dsm-qa-main` / `.dsm-qa-rail` 加了 `width:100%`；结果变成「无论内容多少都铺满整块区域」，用户 m03562 反馈不自然。正确分工：**防被内容顶宽** → 链路上每一环 `min-width:0` + `overflow:hidden`；**防强制占满** → 容器不要写 `width:100%`，用 `max-width` + `margin:0 auto` 让块级默认行为接管。
 61. **从宿主 asar 里找 hash 类名的宽度规则是死路**。`D:/DeepSeek Harness/resources/app.asar` 里能解出 12 个 `.css`，但 `_mainPanel_` / `_centerCol_` 这些 hash 类名 0 命中——它们来自 JS 注入的样式串，不在独立 CSS 文件里。要么在 asar 的 JS 里按 utf8 搜，要么直接实测 `getBoundingClientRect()` 打日志，别再解 CSS。
 
+62. **写别人的配置文件时，normalize 规则必须逐条镜像，不能"差不多"**：`llm-router` / `subagent-router` 读回时都会再跑一遍自己的 `normalizeSettings()`，任何我们写出去、它不认识的键会被静默丢掉。镜像不精确的症状是"改了又弹回去"——尤其容易漏的三处：`neverSwitchOnCodes` 的默认四码是**始终并入**的（用户只能往上加，不能删），`parseCandidate` 拒绝 `provider === 'llm-router'`（路由组不能当自己的候选），`tier` 不认识时回落 `light` 而不是报错。写这层之前先把对方的 `lib/settings.js` 从头读一遍。
+
+63. **`needsRestart` 是这套 UI 里最容易被误读的一个字段**：MCP 与 Skill 两个 sheet 都写"重启后生效"，模型路由紧挨着它们，但它是纯文件轮询（5 秒）。把 `needsRestart: false` 连同解释一起写进响应体与弹层底部文案，否则用户会去重启一次什么都不用重启的进程。
+
+64. **读不到 ≠ 空**：两个插件的 settings.json 都可能根本不存在（没装 / 没写过）。`snapshot` 里带 `missing: true` 让界面能说"没读到，新建会创建它"，而不是显示一张空表让用户以为配置被清了。附带一条：**只读不要顺手 mkdir**——那会让"没装插件"看起来像"装了但空的"。
+
+65. **整表替换 + 无并发保护＝别两边同时改**：两个插件都是"读全表 → 改 → 写全表"，我们的面板也一样。所以 `/router add` 与面板同时操作会后写覆盖前者。缓解手段是每次写前落 `.bak-routerui-<时间戳>`（本次实现如此），以及在弹层底部写清这一点；真正的锁不在本仓库能力范围内。
+
+66. **纯逻辑层要连"脏输入下仍能出可用默认值"一起测**：`router-core.js` 的 20 项里有 6 项是喂 `null / undefined / {} / [] / 'junk' / 42 / true`。这类函数的调用方是用户手改过的文件，能抛异常就等于把面板关死了。
+
 ## 11. 待办 / 开放问题
 
 | 序号 | 事项 | 现状 | 建议 |
@@ -447,7 +461,7 @@ localStorage（浏览器侧）：
 | 1 | 「收藏 / 待回看 / 优先级」在「已标记」区是否拆成三小行 | **v3.11.0 已拆**：用户拍板「可以拆成三小行」。`logic.markedRowsByKind` 按 star → review → priority 分通道（一个会话只归第一个命中类，`badges` 仍显示全部标记），折叠键是 `sec:marked:star` / `sec:marked:review` / `sec:marked:priority` | 已闭合；改口径先看 `tests/panel-sections.test.js` 的 4 项断言 |
 | 2 | 右栏（侧边栏）形态的滚动/高度是否真的生效 | **2026-11-18 已验证生效**：`panel:fit avail=738 anc=div.acoR2W_tabBody ch=744`，`panel:scroll 0:div.dsm-qa-rail oy=auto ch=351 sh=351`（rail 内容不溢出，故无需滚动）；主面板侧 `0:div.dsm-qa-main oy=auto ch=487 sh=487` 同样不溢出 | 若日后内容变多，复查 `ch > sh` 且 `oy` 可滚即可，无需再改代码 |
 | 3 | 工作区归档 / 可见性 | **v3.12.0 已移植**（用户选语义 A = 只做可见性）：`src/workspace-archive-core.js` 纯逻辑 + `src/workspace-archive.js` 文件 I/O + 路由 `/archived-sessions/workspace-archives` + 维护栏「工作区归档」sheet + 侧栏 `setGroupHidden` 整组折叠 + 面板 `visibleItemsAfterWorkspaceFold` 过滤。**不动会话归档状态**，所以「已归档」视图保持干净 | 已闭合；语义若要改成「同时归档会话」，改 host 路由的 archive 分支即可，UI 不用动 |
-| 4 | `window.__dshSessionsManager.version` | **v3.14.3 已同步**（现为 `3.14.3`） | 升 package 版本时要同步 5 处：`package.json`、`package-lock.json`（2 处）、`README.md` 的 badge、`src/client/index.jsx` 的 `version:` 字段 |
+| 4 | `window.__dshSessionsManager.version` | **v3.15.0 已同步**（现为 `3.15.0`） | 升 package 版本时要同步 5 处：`package.json`、`package-lock.json`（2 处）、`README.md` 的 badge、`src/client/index.jsx` 的 `version:` 字段 |
 | 5 | `dsmFitPanel` 无单测（依赖 DOM） | 靠日志验证 | 若要测，抽纯函数算 `avail` 再测 |
 | 6 | 上游若有新版格式（落盘 schema 漂移） | **v3.12.0 已加哨兵**：`npm run check:schema` 把 11 份落盘索引的 schemaVersion 钉成表，与 `upstream/main` 逐文件比对；`tests/check-schema.test.js` 3 项自检防止哨兵本身失效（常量改名、新增 store 忘了登记都会红） | 每次 rebase 前跑一次；上游改了版本号就按 §12 末尾的「schema 漂移处置」走 |
 | 7 | MCP 服务器开关（`/archived-sessions/mcp/*` + 维护栏 sheet） | 已实现并通过单测（`tests/mcp-rows.test.js` 13 项 + `tests/mcp-routes.test.js` 2 项） | 真机点一遍；确认重启后 MCP 连接按新开关状态建立 |
@@ -520,13 +534,13 @@ npm run check:schema -- --local # 没有 upstream 分支时只看本地常量是
 
 ## 13. 给接手会话的第一天
 
-1. 读本文件 + `git log --oneline -15`。最近一条应为 v3.14.3（面板不再强制铺满）或其后；`main` 与 `origin/main` 可能差若干条未推送提交，见 §14。
+1. 读本文件 + `git log --oneline -15`。最近一条应为 v3.15.0（模型路由面板）或其后；`main` 与 `origin/main` 可能差若干条未推送提交，见 §14。
 2. `npm run build && npm test && npm run check:schema`，把失败数与 §7.2 的基线对齐（本机 4–5 项，按测试名对照）。若明显超出，先查是不是本机环境变了（`git stash -u` 对照 pristine 再 `git stash pop`）。
 3. 打开面板，看 `debug.log` 里 `session-list:store-ready` / `panel:fit` / `host-list:loaded` 三行是否正常。
 4. 要改 UI 前，先确认改的是现役选择器（`.dsm-qa-main` / `.dsm-qa-rail`），别改已停用的 `.dsm-qa-panel`。
 5. 不要替用户做「拆三行 / 改名」这类产品决定；把方案摆出来让用户选。
 6. 每次提交都跑 `check:dist`，并且把 `lib/` 一起提交。
-7. 改 skill / MCP 子系统前先读 §10 的 17–30 条——那十四条全是评审与自审实测出来的真缺陷，且都有回归测试兜着，改的时候别把它们改回去。改工作区归档或 debug.log 前读 §10 的 31–36 条；改面板外观 / 胶囊联动前读 37–51 条；改后台任务前读 52–61 条。
+7. 改 skill / MCP 子系统前先读 §10 的 17–30 条——那十四条全是评审与自审实测出来的真缺陷，且都有回归测试兜着，改的时候别把它们改回去。改工作区归档或 debug.log 前读 §10 的 31–36 条；改面板外观 / 胶囊联动前读 37–51 条；改后台任务前读 52–61 条；改模型路由前读 62–66 条。
 8. `edit` 工具写 `src/client/index.jsx` 会产出 **CRLF**。改完用 `git diff --stat` 看行数，异常就用 node `.replace(/\r\n/g,'\n')` 归一化后再 `commit --amend`；长文件优先用 python/node 脚本改而不是 `edit`。
 
 ---
@@ -550,9 +564,9 @@ npm run check:schema -- --local # 没有 upstream 分支时只看本地常量是
 - 不要在命令里回显 token；CC Safety Net 也会拦 `~/.git-credentials`、`~/.ssh` 的读取。
 - 推送体积：`git count-objects -vH` 约 5.6 MiB（`lib/` 已提交、`node_modules` 忽略），常见网络下 push 可能要 30s 以上，别用 30s 超时的前台命令。
 
-## 15. 最近几代改了什么（v0.6.1 → v3.14.3）
+## 15. 最近几代改了什么（v0.6.1 → v3.15.0）
 
-新会话不必回看 git log 的全部细节，这一节就是浓缩版；每条都能在 §10 找到对应的坑与纪律。最近新增的是 v3.11.0 / v3.12.0 / v3.13.0 / v3.13.1 / v3.13.2 / v3.13.3 / v3.14.0 / v3.14.1 / v3.14.2 / v3.14.3 十节。
+新会话不必回看 git log 的全部细节，这一节就是浓缩版；每条都能在 §10 找到对应的坑与纪律。最近新增的是 v3.11.0 / v3.12.0 / v3.13.0 / v3.13.1 / v3.13.2 / v3.13.3 / v3.14.0 / v3.14.1 / v3.14.2 / v3.14.3 / v3.15.0 十一节。
 
 ### v0.6.1 — skill 管理（`1223c46`）
 - 新增 `src/skill-rows.js`（扫描宿主 skill 根、读/写 SKILL.md frontmatter、三态映射、导入导出、删除）与 `src/zip-lite.js`（零依赖 zip，只用 `node:zlib`）。
@@ -665,6 +679,21 @@ v3.14.0 把三角做在了侧栏 DOM 注入层，用户反馈「左侧工作区�
 - `.dsm-qa-rail`：`width:100%` + `max-width:none` 改为 `min-width:0` + `max-width:100%`。侧栏本来就是窄栏，靠父容器给宽即可。
 
 保留 v3.14.2 的下游收缩链（`.dsm-qa-jobs` / `.dsm-qa-job-name` / `.dsm-qa-row` / `.dsm-qa-group` 的 `min-width:0` + overflow），那是防「被内容顶宽」，与本条不冲突。
+
+
+### v3.15.0 — 模型路由面板
+
+用户 m03631 提的：「本机实现了模型路由（llm-router 和 subagent-router），你能将"模型路由"也加入到管理范围里吗」；m03726 拍板范围：第 2 层（常用编辑）、两个插件做成同一弹层的两个分区、尽量全功能、**保留原入口**。用户还纠正了一句语气：「你说"这个面板会是它第一份图形界面"，但你应该修改/添加的是自身的适配」——这个面板是本插件的适配层，不是给 llm-router 做 UI。
+
+可行性来自两边都是纯 JSON + 指纹轮询：改文件 5 秒生效，不需要调用任何内部 API，也不需要重启。
+
+- `src/router-core.js`：两个插件 normalizer 的镜像（纯逻辑，无 `node:` 导入）。`parseCandidate` / `normalizeLlmRoute` / `normalizeLlmSettings` / `addRoute` / `updateRoute` / `removeRoute` / `moveCandidate` / `formatRoute`，子代理侧 `normalizeSubagentCandidate` / `normalizeSubagentSettings` / `addSubagentCandidate` / `updateSubagentCandidate` / `removeSubagentCandidate` / `moveSubagentCandidate` / `appendRouterCandidates`（对应 `/subagent-router reload`，只加不改），加 `applyLlmOp` / `applySubagentOp` 两张分发表与 `crossCheck`（悬空候选 + 没被借用的路由组）。`RouterError` 带 `status: 400`，界面直接显示它的中文原文。
+- `src/router-store.js`：文件 I/O。`resolveDshHome()` 与插件一致（`DSH_HOME` 优先）；读带 `mtimeMs:size` 指纹缓存；写走 `temp + rename`，改前落 `.bak-routerui-<时间戳>`；`snapshot()` 一次给出两个表 + `check` + `needsRestart: false`。
+- host 侧两条路由：`POST /archived-sessions/router/snapshot` 与 `POST /archived-sessions/router/apply`（body `{ target: 'llm'|'subagent', op }`）。apply 的响应里直接带最新 `snapshot`，所以客户端不用二次请求。
+- 客户端：维护栏右侧第三个按钮「模型路由（N）」，`mv-sheet` 里 `mv-seg` 两个分区。LLM 分区：总开关 / 提示方式 / 默认策略 / 全局粘性、每条路由的链（`↑↓` 逐跳挪）、编辑（显示名 + 一行一个候选的 textarea）、删除、新建。子代理分区：总开关 / 引导开关 / 「从 LLM 路由补全」、每条候选的 `↑↓` / 轻⇄重切换 / 删除，悬空候选标红「路由组已不存在」。
+- 测试：`tests/router-core.test.js` 20 项、`tests/router-store.test.js` 14 项、`tests/router-routes.test.js` 6 项。全量 55 → 58 个文件、561 → 601 项。
+
+一处刻意的取舍：编辑链用「一行一个候选的 textarea」而不是逐个加/删的小控件。因为候选的合法形状（`provider/model`、`@effort`、拒绝嵌套路由组）本来就只能靠文本表达，做成结构化控件反而要复刻一遍解析规则；textarea 让 host 侧的 `parseCandidate` 成为唯一裁判，报错原文也能直接贴给用户。
 
 
 ## 16. 手工卸载 `dsh-mcp-manager`（2026-11-18 实录）
