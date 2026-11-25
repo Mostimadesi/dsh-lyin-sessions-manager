@@ -14,7 +14,7 @@
 | 本机仓库路径 | `D:\DeepSeek Harness\workspace\plugins_helper\session-manager-unified\dsh-lyin-sessions-manager` |
 | 分支 / 远程 | `main`；`origin` = https://github.com/Mostimadesi/dsh-lyin-sessions-manager（公开），`upstream` = TOBYCAI/dsh-sessions-manager |
 | 插件包名 | `dsh-lyin-sessions-manager`（**改包名要同时改** `build.mjs` 的 ModuleLoader banner） |
-| package 版本 | `3.15.0`（上游 3.7.10 → 3.8.0 面板能力 → 3.9.0 加 MCP 开关 → 3.10.0 加 skill 管理 → 3.10.1 维护栏分组 → 3.10.2 评审加固 → 3.10.3 全量自审修复 → 3.11.0 debug.log 轮转 + 已标记拆三行 + 工作区筛选哨兵 → 3.12.0 工作区归档 + `check:schema` → 3.13.0 面板外观跟随歌词胶囊 → 3.13.1 材质铺满面板 + 吸顶条去实色 + 默认铺满宽度 → 3.13.2 筛选框进吸顶条 + 顶部空隙用负 margin 吃掉 → 3.13.3 负 margin 幂等化（否则重算即抹平）+ 顶条贴住面板上沿 → 3.14.0 侧栏「后台任务」小三角 + 就地展开 → 3.14.1 后台任务挪进「进行中的会话」面板 → 3.14.2 三角外观对齐侧栏 + 长任务名不再撑宽面板 → 3.14.3 面板不再强制铺满（删 width:100%） → 3.15.0 模型路由面板） |
+| package 版本 | `3.16.0`（上游 3.7.10 → 3.8.0 面板能力 → 3.9.0 加 MCP 开关 → 3.10.0 加 skill 管理 → 3.10.1 维护栏分组 → 3.10.2 评审加固 → 3.10.3 全量自审修复 → 3.11.0 debug.log 轮转 + 已标记拆三行 + 工作区筛选哨兵 → 3.12.0 工作区归档 + `check:schema` → 3.13.0 面板外观跟随歌词胶囊 → 3.13.1 材质铺满面板 + 吸顶条去实色 + 默认铺满宽度 → 3.13.2 筛选框进吸顶条 + 顶部空隙用负 margin 吃掉 → 3.13.3 负 margin 幂等化（否则重算即抹平）+ 顶条贴住面板上沿 → 3.14.0 侧栏「后台任务」小三角 + 就地展开 → 3.14.1 后台任务挪进「进行中的会话」面板 → 3.14.2 三角外观对齐侧栏 + 长任务名不再撑宽面板 → 3.14.3 面板不再强制铺满（删 width:100%） → 3.15.0 模型路由面板 → 3.16.0 会话右键菜单改走官方 contextMenus） |
 | 目标宿主 | DSH **0.2.2-rc.1**（`D:\DeepSeek Harness`，nightly 通道） |
 | 构建 | `npm run build` → 产出 `lib/index.js` + `lib/client.js`（**产物要提交**） |
 | 测试 | `npm test`（= `node scripts/run-tests.mjs`，58 个测试文件 / 601 项，Windows 基线 5 项失败见 §7.2） |
@@ -702,6 +702,24 @@ v3.14.0 把三角做在了侧栏 DOM 注入层，用户反馈「左侧工作区�
 
 一处刻意的取舍：编辑链用「一行一个候选的 textarea」而不是逐个加/删的小控件。因为候选的合法形状（`provider/model`、`@effort`、拒绝嵌套路由组）本来就只能靠文本表达，做成结构化控件反而要复刻一遍解析规则；textarea 让 host 侧的 `parseCandidate` 成为唯一裁判，报错原文也能直接贴给用户。
 
+
+### v3.16.0 — 会话右键菜单改走官方 `contextMenus`
+
+用户报告：右键菜单里「标记未读 / 移动会话 / 删除会话」三项**从来没有出现过**，而他一直以为插件没有这个功能。其余侧栏增强（圆点、拖拽、分组折叠、后台任务三角）都正常。
+
+根因在宿主侧的结构变化，不在我们的代码回归：0.2.2（含本机 rc.1）把会话菜单改成「数据注册 + portal 渲染」。`dsh-client-ui-workspace` 的会话行走 `getTriggerProps({ kind: 'session', value: { sessionId, displayTitle } })` → `ctx.contextMenus.open(...)`，菜单由 `dsh-client-ui-context-menu` 以 `portal: true` 渲染进 `shell.overlay`。**portal 出去的是独立 React 树，祖先链里没有 `SessionNodeItem`**，于是 `sessionInfoFromMenu()` 的 fiber 上溯永远拿不到 `props.node.id`，注入段整段静默跳过——这正是上游 `f010392` 修 issue #28 的同一根因。上游 message 里写了，我们的 §11 当初却把它判成「依赖 0.2.2，暂不吸收」，判断错了。
+
+- 新增 `registerContextMenus`：`ctx.inject(['contextMenus'])` 等到服务就绪再注册三条（`dsm.mark-unread` / `dsm.move-session` / `dsm.delete-session`）。**必须用 `inject` 不能用 `get`**——apply 时服务尚未提供，`get` 拿到 undefined 就整块跳过（HANDOFF §4.1 的老教训又踩了一次的边界）。
+- 动作层收敛到模块级：`dsmMenuToast` / `dsmOpenDeleteConfirm` / `dsmMenuMoveTo` / `dsmMenuRefreshSnapshot`。DOM shim 与数据注册**共用同一份**，不再各写一遍——两处各写一份正是这次「新通道整个没接、还没人发现」的成因。
+- `resolve` 有 **1000ms** 上限（宿主 `resolutionTimeoutMs`），所以移动子菜单只读预热快照（`DSM_MENU_SNAPSHOT_TTL_MS = 15000`），绝不在 resolver 里现拉接口；快照没热起来时返一个「正在加载工作区，请再打开一次菜单」的禁用项并后台预热。
+- 同一个 `(target, id)` 重复注册会 throw。`reg()` 逐条 try/catch，单条失败不带垮另外两条；返回值都挂 `ctx.effect`。
+- 通道可观测：客户端把实际生效的路径（`contextMenus` / `dom` / null）报给 `POST /archived-sessions/capabilities`，host 回显成 `clientMenu`。**只有真的注入进 DOM 才报 `dom`**，否则会把「两条路都不通」伪装成正常兜底。
+- 纯逻辑抽进 `logic.js`：`markUnreadLabel` / `moveCapabilityOf` / `moveTargets` / `menuChannelOf`，`tests/menu-actions.test.js` 5 项（含 `null/undefined/{}/[]/'junk'/42/true` 脏输入）。
+- 没动旧 DOM 注入：老宿主上它仍是唯一出路，且 `dsmMenuMode === 'contextMenus'` 时直接早退，不再每次开菜单都白跑一遍 fiber 上溯。
+
+**生效方式**：客户端改动刷新页面即可；host 侧新增的 `clientMenu` 字段要重启 DSH 才有（旧 host 上该字段缺失不影响功能）。
+
+---
 
 ## 16. 手工卸载 `dsh-mcp-manager`（2026-11-18 实录）
 
