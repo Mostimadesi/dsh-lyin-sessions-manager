@@ -2219,15 +2219,29 @@ export function apply(ctx) {
       }
     }))
 
+    // v3.16.0：客户端把「会话菜单实际走的是哪条渲染通道」报上来，随 capabilities
+    // 回显。0.2.2 起宿主把会话菜单换成 portal 渲染，旧的 fiber 上溯注入会静默失效
+    // ——那种失效没有任何报错，只能靠这个字段判断「是不是路径变了」。
+    let clientMenuProbe = null
     registerRoute({
       kind: 'exact',
       path: '/archived-sessions/capabilities',
-      handler: async (req, res) => json(res, {
-        ...capabilities,
-        buildStamp: BUILD_STAMP,
-        // v0.7.0：把 debug.log 的上限报出来，方便一眼核对「运行时是不是这份构建」。
-        debugLog: { maxBytes: DEBUG_LOG_MAX_BYTES, keep: DEBUG_LOG_KEEP },
-      }),
+      handler: async (req, res) => {
+        try {
+          const body = await readJsonBody(req)
+          const mode = body && typeof body.menuMode === 'string' ? body.menuMode : null
+          if (mode) clientMenuProbe = { mode, at: Date.now() }
+        } catch (e) { /* 老客户端不带 body：保留上一次记录 */ }
+        json(res, {
+          ...capabilities,
+          buildStamp: BUILD_STAMP,
+          // v0.7.0：把 debug.log 的上限报出来，方便一眼核对「运行时是不是这份构建」。
+          debugLog: { maxBytes: DEBUG_LOG_MAX_BYTES, keep: DEBUG_LOG_KEEP },
+          // v3.16.0：'contextMenus' = 官方数据注册；'dom' = 旧宿主 DOM 注入；
+          // null = 尚未上报。看到 'dom' 或 null 就说明菜单可能已经不在预期形态上。
+          clientMenu: clientMenuProbe,
+        })
+      },
     })
 
     // 活跃会话心跳（客户端 → host）。0.1.7+ 起 host 无从得知 UI 当前选中了哪个

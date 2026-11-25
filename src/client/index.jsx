@@ -13,6 +13,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { aliveSessionCount, applyTagFilter, ascPriority, canDropOnWorkspace, collapsedVisibleTotal, countRenderedVisible, dotStateFor, dragAutoScrollStep, effectiveTitleOf, filterShapeFromSaved, filterSnapshotOf, foldActivityItems, foldBranches, foldOrphanSubagents, foldSubagentRows, foldSubagents, groupQuickAccess, isWorkspaceSentinel, markedRowsByKind, matchWorkspaceFilter, shouldHideEmptyGroup, WS_GONE, WS_UNGROUPED, mergeActivityItems, normalizeCollapsed, noticeToastPlan, QA_MARKED_KIND_HINT, QA_MARKED_KIND_LABEL, QA_MARKED_KINDS, QA_RECENT_WINDOW_MS, recentActiveRows, stateFromSessionStatus, summaryCounts, openSubagentToast, overflowPlan, pathTail, priorityOf, remainingRows, reviewOf, sessionForNodes, shortId, starredOf, tagDeleteConfirm, titleBackfillDecision, toastDurationFor, workspaceForNodes } from './logic.js'
 
+import { markUnreadLabel, menuChannelOf, moveCapabilityOf, moveTargets } from './logic.js'
 import { visibleItemsAfterWorkspaceFold, workspaceKeyOf } from '../workspace-archive-core.js'
 import { JOB_BADGE_MAX_ROWS, jobBadgeText, jobDurationLabel } from '../background-jobs.js'
 import { CAPSULE_COLOR_KEY, CAPSULE_DISPLAY_KEY, CAPSULE_EVENTS, CAPSULE_NOTICE_KEY, FOLLOW_PRESET, QA_STYLE_VAR_KEYS, capsuleFollowInfo, qaVarsFromCapsule } from './capsule-link.js'
@@ -4655,6 +4656,112 @@ function dsmToggleManual(id) {
   if (dsmRepaintDots) dsmRepaintDots()
 }
 
+// ---- 会话右键菜单的「动作层」（v3.16.0）------------------------------------
+// 0.2.2（含本机 rc.1）起，宿主的会话菜单改成「数据注册 + portal 渲染」：弹层挂在
+// body 下是一棵独立 React 树，fiber 祖先链里没有 SessionNodeItem，靠上溯取
+// sessionId 的 DOM 注入因此整段失效（上游 issue #28 同一根因，本机 asar 已核实）。
+// 官方给的 ctx.contextMenus.register({ target: 'session' }) 直接把 sessionId 交过来，
+// 所以「动作」收敛到这一层：数据注册（新路径）与 DOM shim（旧宿主兜底）共用同一
+// 份实现，不再各写一遍——两处各写一份正是这次「三项全没了却没人发现」的成因。
+let dsmMenuStyleInjected = false
+function dsmMenuEnsureStyle() {
+  if (dsmMenuStyleInjected || typeof document === 'undefined' || !document.head) return
+  // DOM 那条路径已经注入过同一份样式（dataset.dsm = 'aug'），不要重复插。
+  try { if (document.querySelector('style[data-dsm="aug"]')) { dsmMenuStyleInjected = true; return } } catch (e) { /* 查询失败就照常注入 */ }
+  try {
+    const s = document.createElement('style')
+    s.dataset.dsm = 'aug'
+    s.textContent = SIDEBAR_AUG_CSS
+    document.head.appendChild(s)
+    dsmMenuStyleInjected = true
+  } catch (e) { /* 注入失败：动作仍可用，只是外观退回宿主默认 */ }
+}
+
+function dsmMenuToast(msg) {
+  if (typeof document === 'undefined' || !document.body) return
+  const t = document.createElement('div')
+  const text = String(msg == null ? '' : msg)
+  t.className = 'dsm-toast' + (text.length > 28 ? ' dsm-toast-long' : '')
+  t.textContent = text
+  t.title = '点击关闭'
+  t.setAttribute('role', 'status')
+  document.body.appendChild(t)
+  // 停留时长按字数给（固定 2.6s 读不完排队/失败类文案），并允许点击提前关闭。
+  let killTimer = null
+  const kill = () => { if (killTimer) clearTimeout(killTimer); t.remove() }
+  killTimer = setTimeout(kill, toastDurationFor(text))
+  t.addEventListener('click', kill)
+}
+
+function dsmOpenDeleteConfirm(id) {
+  if (typeof document === 'undefined' || !document.body) return
+  dsmMenuEnsureStyle()
+  const backdrop = document.createElement('div')
+  backdrop.className = 'dsm-backdrop'
+  const dlg = document.createElement('div')
+  dlg.className = 'dsm-dlg'
+  dlg.innerHTML = '<h3 class="dsm-title">删除会话</h3><p class="dsm-text">确认将该会话移入回收站？可在「设置 → 会话管理 → 回收站」中恢复或彻底删除。</p><div class="dsm-actions"><button type="button" class="dsm-btn" data-role="cancel">取消</button><button type="button" class="dsm-btn dsm-del" data-role="ok">移入回收站</button></div>'
+  backdrop.appendChild(dlg)
+  document.body.appendChild(backdrop)
+  const close = () => backdrop.remove()
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close() })
+  dlg.querySelector('[data-role=cancel]').addEventListener('click', close)
+  dlg.querySelector('[data-role=ok]').addEventListener('click', () => {
+    close()
+    postJSON('/archived-sessions/delete', { sessionId: id })
+      .then(() => {
+        if (dsmTrashIds) dsmTrashIds.add(String(id))
+        if (dsmRepaintDots) dsmRepaintDots()
+        dsmMenuToast('已移入回收站')
+      })
+      .catch((e) => dsmMenuToast('删除失败：' + String((e && e.message) || e)))
+  })
+}
+
+// 移动时的目标工作区清单。菜单的 resolve 有 1000ms 上限（宿主 resolutionTimeoutMs），
+// 里面现拉两个接口必超时，所以这里预热一份快照，resolve 只读内存。
+const DSM_MENU_SNAPSHOT_TTL_MS = 15000
+let dsmMenuSnapshot = { at: 0, workspaces: [], sessionPath: new Map() }
+let dsmMenuSnapshotPending = null
+function dsmMenuCachedWorkspaces() { return dsmMenuSnapshot.workspaces }
+function dsmMenuCachedPathOf(id) { return dsmMenuSnapshot.sessionPath.get(String(id)) || null }
+function dsmMenuRefreshSnapshot(force) {
+  const now = Date.now()
+  if (!force && dsmMenuSnapshot.at && now - dsmMenuSnapshot.at < DSM_MENU_SNAPSHOT_TTL_MS) return Promise.resolve(dsmMenuSnapshot)
+  if (dsmMenuSnapshotPending) return dsmMenuSnapshotPending
+  dsmMenuSnapshotPending = (async () => {
+    try {
+      const [ws, sess] = await Promise.all([
+        postJSON('/archived-sessions/workspaces', {}),
+        postJSON('/archived-sessions/sessions', {}),
+      ])
+      const sessionPath = new Map()
+      for (const item of (sess && sess.items) || []) {
+        if (item && item.sessionId != null && typeof item.workspacePath === 'string') sessionPath.set(String(item.sessionId), item.workspacePath)
+      }
+      dsmMenuSnapshot = { at: Date.now(), workspaces: (ws && ws.items) || [], sessionPath }
+    } catch (e) { /* 拉取失败保留上一份快照，菜单退化为「暂无可用工作区」而不是抛错 */ }
+    finally { dsmMenuSnapshotPending = null }
+    return dsmMenuSnapshot
+  })()
+  return dsmMenuSnapshotPending
+}
+
+async function dsmMenuMoveTo(id, targetPath, label) {
+  try {
+    const r = await postActiveAware('/archived-sessions/move', { sessionId: id, targetPath })
+    // 会话被 DSH 打开（活跃/未关闭）时服务端只登记排队：磁盘与工作区分组都没动。
+    // 无条件报「移动成功」正是 2026-09-10 用户报的那个坑，必须按服务端结果如实说明。
+    if (r && r.queued) {
+      dsmMenuToast(r.notes && r.notes.length ? r.notes.join(' ') : '会话正被 DSH 打开，已排队待移动；重启 DSH 后会自动完成（请先别打开它）。')
+      return
+    }
+    dsmMenuToast(r && r.already ? `已在「${label}」` : `已移到「${label}」`)
+  } catch (e) {
+    dsmMenuToast('移动失败：' + String((e && e.message) || e))
+  }
+}
+
 // Recycle-bin membership (session ids currently in 回收站). The sidebar
 // status-dot installer uses this to hide trashed sessions so they don't show
 // up under DSH's "未分组" group. Loaded from the backend on a throttle and
@@ -4931,7 +5038,7 @@ const sidebarAdapter = createSidebarAdapter()
 // apply(ctx) 可能被再次调用（HMR / profile 重载）：用模块级守卫保证观察器、
 // 定时器与 document 级监听器只装一份，绝不叠加（叠加会造成重复提示与后台 CPU 增长）。
 let sidebarMenuAugInstalled = false
-function installSidebarSessionMenuAug() {
+function installSidebarSessionMenuAug(ctx) {
   if (typeof document === 'undefined') return
   if (sidebarMenuAugInstalled) return
   sidebarMenuAugInstalled = true
@@ -4966,20 +5073,8 @@ function installSidebarSessionMenuAug() {
     d.textContent = s == null ? '' : String(s)
     return d.innerHTML
   }
-  const toast = (msg) => {
-    const t = document.createElement('div')
-    const text = String(msg == null ? '' : msg)
-    t.className = 'dsm-toast' + (text.length > 28 ? ' dsm-toast-long' : '')
-    t.textContent = text
-    t.title = '点击关闭'
-    t.setAttribute('role', 'status')
-    document.body.appendChild(t)
-    // 停留时长按字数给（固定 2.6s 读不完排队/失败类文案），并允许点击提前关闭。
-    let killTimer = null
-    const kill = () => { if (killTimer) clearTimeout(killTimer); t.remove() }
-    killTimer = setTimeout(kill, toastDurationFor(text))
-    t.addEventListener('click', kill)
-  }
+  // v3.16.0：提示 / 删除确认 / 移动都收敛到模块级动作层，数据注册那条路径也调同一份。
+  const toast = dsmMenuToast
   const ensureStyle = () => {
     if (styleInjected) return
     const s = document.createElement('style')
@@ -5083,29 +5178,8 @@ function installSidebarSessionMenuAug() {
       placeSub()
     })
   }
-  const openDeleteConfirm = (id) => {
-    ensureStyle()
-    const backdrop = document.createElement('div')
-    backdrop.className = 'dsm-backdrop'
-    const dlg = document.createElement('div')
-    dlg.className = 'dsm-dlg'
-    dlg.innerHTML = '<h3 class="dsm-title">删除会话</h3><p class="dsm-text">确认将该会话移入回收站？可在「设置 → 会话管理 → 回收站」中恢复或彻底删除。</p><div class="dsm-actions"><button type="button" class="dsm-btn" data-role="cancel">取消</button><button type="button" class="dsm-btn dsm-del" data-role="ok">移入回收站</button></div>'
-    backdrop.appendChild(dlg)
-    document.body.appendChild(backdrop)
-    const close = () => backdrop.remove()
-    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close() })
-    dlg.querySelector('[data-role=cancel]').addEventListener('click', close)
-    dlg.querySelector('[data-role=ok]').addEventListener('click', () => {
-      close()
-      postJSON('/archived-sessions/delete', { sessionId: id })
-        .then(() => {
-          if (dsmTrashIds) dsmTrashIds.add(String(id))
-          if (dsmRepaintDots) dsmRepaintDots()
-          toast('已移入回收站')
-        })
-        .catch((e) => toast('删除失败：' + String((e && e.message) || e)))
-    })
-  }
+  // v3.16.0：删除确认也收敛到模块级动作层（数据注册那条路径同样调用）。
+  const openDeleteConfirm = dsmOpenDeleteConfirm
   const augmentMenu = (menuEl, info) => {
     if (menuEl.querySelector('[' + AUG + ']')) return
     const viewport = menuEl.querySelector('[role="presentation"]') || menuEl.firstElementChild
@@ -5185,6 +5259,10 @@ function installSidebarSessionMenuAug() {
   const seen = new WeakSet()
   const obs = new MutationObserver(() => {
     if (sidebarAdapter.disabled) return
+    // 0.2.2 起宿主把会话菜单交给官方 contextMenus（portal 进 shell.overlay），
+    // 这条路已经取不到 sessionId（见文件头的适配层说明）。只有 !menuMode 时才
+    // 继续扫 DOM，避免在老宿主之外每开一次菜单都白跑一遍 fiber 上溯。
+    if (dsmMenuMode === 'contextMenus') return
     const menus = document.querySelectorAll('body > [role="menu"]')
     menus.forEach((menuEl) => {
       if (seen.has(menuEl)) return
@@ -5192,9 +5270,124 @@ function installSidebarSessionMenuAug() {
       if (!info) return // not a session menu (e.g. settings / header dropdown)
       seen.add(menuEl)
       try { augmentMenu(menuEl, info) } catch (e) { /* best-effort DOM shim */ }
+      // 真的注入进 DOM 才算「走的是 dom」——仅凭没装 contextMenus 就报 dom，会把
+      // 「宿主改版导致两条路都不通」误报成「正常兜底」，那正是这次没被发现的原因。
+      if (!dsmMenuMode && menuEl.querySelector('[' + AUG + ']')) dsmMenuReportMode('dom')
     })
   })
   obs.observe(document.body, { childList: true, subtree: false })
+  // 实测能用的那条路直接装上；装不上就退回上面那套 DOM shim（旧宿主）。
+  installContextMenus(ctx)
+}
+
+// ---- 会话右键菜单：官方 contextMenus 数据注册（v3.16.0）--------------------
+// 实际启用的通道：'contextMenus'（0.2.2+ 官方数据注册）/ 'dom'（旧版 DOM 注入）/
+// null（尚未判定）。随能力探测一并报给 host，用户报「菜单三项不见了」时不必开
+// devtools 就能定位走的是哪条路——这次就是靠「三项静默消失」才发现的，所以把
+// 通道状态做成可观测字段，而不是只留在代码注释里。
+let dsmMenuMode = null
+function dsmMenuReportMode(mode) {
+  // 归一化后再存：只有这两个值有意义，别把调用点的拼写差异带进上报字段。
+  dsmMenuMode = menuChannelOf(mode === 'contextMenus', mode === 'dom')
+  if (!dsmMenuMode) return
+  try { postJSON('/archived-sessions/capabilities', { menuMode: dsmMenuMode }).catch(() => {}) } catch (e) { /* 诊断字段尽力而为 */ }
+}
+
+function installContextMenus(ctx) {
+  // 必须走 ctx.inject 等就绪，不能直接 ctx.get：apply 执行时客户端服务常尚未提供，
+  // get 拿到 undefined 就会整块跳过（HANDOFF §4.1 的老教训，v0.3.0–v0.3.3 反复栽在这）。
+  if (!ctx || typeof ctx.inject !== 'function') return false
+  try {
+    ctx.inject(['contextMenus'], (scope) => {
+      try { registerContextMenus(scope, scope.contextMenus) } catch (e) { /* 注册失败退回 DOM shim */ }
+    })
+  } catch (e) {
+    // inject 本身不可用（旧宿主没有该服务）→ 静默返回，DOM shim 继续兜底。
+    return false
+  }
+  return true
+}
+
+function registerContextMenus(scope, svc) {
+  if (!svc || typeof svc.register !== 'function' || typeof scope.effect !== 'function') return false
+  const ctx = scope
+  const reg = (input) => {
+    try {
+      ctx.effect(() => svc.register(input), 'dsm menu: ' + input.id)
+      return true
+    } catch (e) {
+      // 同一个 (target, id) 重复注册会 throw。HMR 下旧 effect 若尚未回收就会走到
+      // 这里——绝不能让一条注册失败把另外两条也带下去。
+      return false
+    }
+  }
+  // 官方会话项 order：pin 100 / rename 200 / fork 300 / 复制 ID 450 / 归档 600。
+  // 标记未读排最前；移动与删除用 afterContent 排进 footer，按危险度递增。
+  const okMark = reg({
+    id: 'dsm.mark-unread',
+    target: 'session',
+    order: 50,
+    resolve: ({ sessionId }) => {
+      const id = String(sessionId)
+      return [{ id: 'toggle', label: markUnreadLabel(dsmLoadManual().has(id)), run: () => { dsmToggleManual(id) } }]
+    },
+  })
+  const okMove = reg({
+    id: 'dsm.move-session',
+    target: 'session',
+    order: 700,
+    resolve: ({ sessionId }) => {
+      const id = String(sessionId)
+      const disabled = (reason) => [{
+        id: 'move',
+        label: '移动会话',
+        afterContent: true,
+        disabled: true,
+        ...(reason ? { failureLabel: reason } : {}),
+      }]
+      const cap = moveCapabilityOf(dsmCapabilities)
+      if (!cap.available) return disabled(cap.reason)
+      // resolve 有 1000ms 上限：只读预热好的快照，绝不在里面现拉接口。
+      const workspaces = dsmMenuCachedWorkspaces()
+      if (!workspaces.length) {
+        // 首次打开时快照可能还没热起来：先返一个占位，同时后台预热，下次打开就齐了。
+        dsmMenuRefreshSnapshot(true)
+        return disabled('正在加载工作区，请再打开一次菜单')
+      }
+      const targets = moveTargets(workspaces, dsmMenuCachedPathOf(id))
+      if (!targets.length) return disabled('没有可移动的目标工作区')
+      return [{
+        id: 'move',
+        label: '移动会话',
+        afterContent: true,
+        children: targets.map((t) => ({
+          id: 'ws:' + t.path,
+          label: t.label,
+          disabled: t.current,
+          failureLabel: '移动失败',
+          run: () => { dsmMenuMoveTo(id, t.path, t.label.replace('（当前）', '')) },
+        })),
+      }]
+    },
+  })
+  const okDel = reg({
+    id: 'dsm.delete-session',
+    target: 'session',
+    order: 800,
+    resolve: ({ sessionId }) => [{
+      id: 'delete',
+      label: '删除会话',
+      afterContent: true,
+      danger: true,
+      run: () => { dsmOpenDeleteConfirm(String(sessionId)) },
+    }],
+  })
+  // 一条都没注册上（例如服务是残桩）→ 不接管，交回 DOM shim。
+  if (!okMark && !okMove && !okDel) return false
+  dsmMenuEnsureStyle()
+  dsmMenuRefreshSnapshot().catch(() => {})
+  dsmMenuReportMode('contextMenus')
+  return true
 }
 
 // Left-side per-session status dot (DOM shim). The color is driven by DSH's
@@ -6581,7 +6774,7 @@ export function apply(ctx) {
   }
   ctx.effect(() => () => { clearInterval(beatTimer); if (beatAc) beatAc.abort() })
   installSettingsNavIcons(ctx)
-  installSidebarSessionMenuAug()
+  installSidebarSessionMenuAug(ctx)
   // 侧栏增强的卸载清退挂到 cordis effect：插件停用/HMR 时 interval、
   // MutationObserver 与全部注入 DOM 一并回收（否则泄漏到页面关闭）。
   const disposeSidebarDots = installSidebarStatusDots()
@@ -6629,7 +6822,7 @@ export function apply(ctx) {
   // 同一能力也尝试注册为客户端 cordis 服务 'lyinSessions'（可用则用）。
   try {
     const api = {
-      version: '3.15.0',
+      version: '3.16.0',
       openSession(id) {
         const target = id === null || id === undefined ? '' : String(id)
         if (!target) return false

@@ -1126,3 +1126,47 @@ export function markedRowsByKind(items, { now = Date.now(), limit = QA_SECTION_L
   }
   return out
 }
+
+
+// ---- v3.16.0：会话右键菜单的动作规划（纯函数，无 DOM）----------------------
+// 两条渲染通道（官方 contextMenus 数据注册 / 旧宿主 DOM 注入）共用同一份「该出
+// 哪些项、哪些禁用、标签写什么」的判定，避免两处各写一遍而再次静默分叉。
+
+/** 「标记未读 / 标记已读」的标签取决于该会话是否已被手动标记。 */
+export function markUnreadLabel(manualUnread) {
+  return manualUnread ? '标记已读' : '标记未读'
+}
+
+/** 移动项是否可用：宿主能力探针说了算；探针缺失按「不可用」处理，宁可灰着也不误报成功。 */
+export function moveCapabilityOf(capabilities, names = ['relocateSession', 'move']) {
+  const actions = capabilities && capabilities.actions
+  if (!actions) return { available: false, reason: '正在检查当前版本的移动能力' }
+  for (const name of names) {
+    const entry = actions[name]
+    if (entry && typeof entry === 'object') {
+      return { available: !!entry.available, reason: entry.reason || null }
+    }
+  }
+  return { available: false, reason: '正在检查当前版本的移动能力' }
+}
+
+/**
+ * 移动子菜单的每一项：当前所在工作区禁用并标「（当前）」。
+ * workspaces 里缺 path 的条目直接丢弃——建了也点不动，只会让菜单看起来坏了。
+ */
+export function moveTargets(workspaces, currentPath) {
+  const list = Array.isArray(workspaces) ? workspaces : []
+  return list
+    .filter((w) => w && typeof w.path === 'string' && w.path)
+    .map((w) => {
+      const name = w.title || w.path.split(/[\\/]/).filter(Boolean).pop() || w.workspaceId || w.path
+      const current = !!currentPath && w.path === currentPath
+      return { path: w.path, label: current ? name + '（当前）' : name, current }
+    })
+}
+
+/** 菜单实际启用的通道：'contextMenus' 优先，其次 'dom'，都没有 = null（尚未判定）。 */
+export function menuChannelOf(hasContextMenusService, domInjected) {
+  if (hasContextMenusService) return 'contextMenus'
+  return domInjected ? 'dom' : null
+}
