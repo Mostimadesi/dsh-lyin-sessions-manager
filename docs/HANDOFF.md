@@ -284,6 +284,10 @@ git stash push -u -q && npm test ; git stash pop   # 在 pristine 状态跑一�
 
 用户环境重启后如果失败数量变化，先确认是不是新增，再动手。
 
+**CI 的 `check:dist` 与本机不同源（2026-11-25 实测）**：`compat.yml` 的 `git diff --exit-code -- lib` 跑在 GitHub 的 Linux runner 上，工作树是 **LF**；本机 `core.autocrlf=true`，检出的是 **CRLF**。`build.mjs` 的指纹直接哈希 `src/` 的**原始字节**（第 43–49 行），所以两边哈希必然不同 —— 本地 `check:dist` 绿、CI 红是**正常现象**，不是产物有问题。要复现 CI：`git -c core.autocrlf=false clone` 到临时目录再 `npm run build`。判据是「换行符差异」，不是「谁忘了重建 lib」。
+
+历史遗留：`5dfb2b0` 及更早的提交里，`lib/client.js.map` 的 `sourcesContent` 与仓库 blob 的换行符不一致（`src/client/logic.js` 混合 CRLF/LF，`crlf=1002 / lf=1013`），这类提交会让 CI 永久红。只有推送新 HEAD 才会让 CI 跑到新提交上（`a8abec7` 起 CI 全绿）。
+
 ### 7.3 最近一次全绿记录
 
 - build stamp `3.15.0+47fc506e`（v3.15.0 模型路由面板；v3.14.3 见 `b486448`，v3.14.2 见 `902c53d`，v3.14.1 见 `fe684f5`，v3.14.0 见 `13809ee`，v3.13.3 见 `46d5c8d`）
@@ -454,6 +458,9 @@ localStorage（浏览器侧）：
 
 66. **纯逻辑层要连"脏输入下仍能出可用默认值"一起测**：`router-core.js` 的 20 项里有 6 项是喂 `null / undefined / {} / [] / 'junk' / 42 / true`。这类函数的调用方是用户手改过的文件，能抛异常就等于把面板关死了。
 
+67. **会话右键菜单在 0.2.2（含本机 rc.1）上已经改走官方 `contextMenus`，fiber 上溯这条路取不到 sessionId（2026-11-25 在 asar 里逐行核实）**：本机 `@deepseek-ai/dsh-client-ui-workspace/lib/client.js` 的会话行用 `getTriggerProps({ kind: 'session', value: { sessionId, displayTitle } })` 开菜单，`openSessionMenu()` 调的是 `ctx.contextMenus.open({ kind: 'session', value: { sessionId, displayTitle } }, point)`；菜单由 `@deepseek-ai/dsh-client-ui-context-menu` 以 `portal: true` 渲染进 `shell.overlay`。**portal 出去的是独立 React 树，祖先链里没有 `SessionNodeItem`，`props.node.id` 永远取不到** —— 这正是上游 `f010392` 修 issue #28 的原因，我们的 `sessionInfoFromMenu()`（`src/client/index.jsx:4948`）走的是同一条死路。判据：菜单里「标记未读 / 移动会话 / 删除会话」三项不出现，而侧栏圆点、拖拽、分组折叠都正常（那是另一条 fiber 路径，仍在同一棵树里，没坏）。
+68. **`contextMenus` 不是 0.2.2 才有的新东西**：本机 rc.1 的 `dsh-client-ui-context-menu` 就已经 `ctx.provide('contextMenus', …)`，并且是 `dsh-web-app` 的默认依赖（已核实 `package.json` 里有 `0.2.2-rc.1`）。所以「等升级到 0.2.2 再说」是错误判断 —— 现在就能用，而且**现在不用就已经在退化**。API 签名：`register({ id, target, order, resolve(targetValue, signal), observe? })`，`resolve` 返回 action 数组；`afterContent` 决定排进 `footer` 还是主体，`danger` / `disabled` / `children`（子菜单）/ `separatorBefore` 全部支持。`resolutionTimeoutMs` 默认 **1000ms**，超时的 provider 会被 abort 并给出失败反馈 —— 所以 `resolve` 里**不能现拉网络**，要像上游那样预热快照（它用 30s 缓存，`84cc522` 里为 rc.3 改成同步解析）。重复注册同一个 `(target, id)` 会 **throw**，HMR 下必须把 register 的返回值挂 `ctx.effect`。
+
 ## 11. 待办 / 开放问题
 
 | 序号 | 事项 | 现状 | 建议 |
@@ -471,7 +478,7 @@ localStorage（浏览器侧）：
 | 13 | `debug.log` 轮转 | **v3.11.0 已实现**：`src/debug-log.js`，单文件 4 MiB、保留 3 个副本（`debug.log.1..3`）、总足迹 16 MiB；写入前判定、超限先轮转；`tests/debug-log.test.js` 12 项 | 已闭合；上限常量在 `src/debug-log.js` 顶部，改完记得同步 `/capabilities` 的 `debugLog` 字段断言 |
 | 10 | skill 导入导出的 license 边界 | `dsh-purge` 是**商业闭源**许可（禁止复制/修改/再分发），所以 zip 读写是自研的 `src/zip-lite.js`，未复制其任何代码 | 若日后要引入其实现，必须先取得授权 |
 | 8 | `dsh-mcp-manager` 是否删除 | **2026-11-18 已手工卸载完成**（见 §16）：补丁 `insert` 块、`package.json` 依赖、`pnpm-lock.yaml` 三段、`node_modules` 目录、`node_modules/.modules.yaml` 的 hoistedLocations、`.dsh-market/state.json` 的 disabled 项全部清理 | 重启 DSH 后复查 `/dsh-market/installed` 的 `disabled` 不再含它 |
-| 14 | **上游已前进 11 个提交**（`upstream/main` 最新 `58e8e1e`，版本 3.8.1；我们停在 merge-base `ad04522` 之后的 `5dfb2b0`） | **2026-11-18 用户明确暂不升级 rc.3**。已吸收两项纯逻辑改动（v3.11.0）：`cefd98f` 的工作区筛选哨兵（`WS_UNGROUPED` / `WS_GONE` / `matchWorkspaceFilter`）与 `f010392` 的 `shouldHideEmptyGroup`（当前会话在组内时绝不整组隐藏）。其余暂不吸收：`f010392` 会话菜单走官方 `contextMenus`（依赖 0.2.2 的 portal 注册）、`0d72015` 设置图标 slot（本机 rc.1 无该现象）、`84cc522` rc.3 适配、`e514e51`+`a05ad7e` projection cache 读冷标题（宿主面具备，但改造面大、收益仅冷启动性能） | 若日后跟进 rc.3，再按 §12 的冲突热区表逐步重放；`src/projection-hints.js` 未移植 |
+| 14 | **上游已前进 12 个提交**（`upstream/main` 最新 `cf9a5bb`，版本 3.8.1；我们停在 merge-base `ad04522` 之后的 `a8abec7`，**已推送**） | **2026-11-18 用户明确暂不升级 rc.3**。已吸收两项纯逻辑改动（v3.11.0）：`cefd98f` 的工作区筛选哨兵（`WS_UNGROUPED` / `WS_GONE` / `matchWorkspaceFilter`）与 `f010392` 的 `shouldHideEmptyGroup`（当前会话在组内时绝不整组隐藏）。**2026-11-25 复核**：上游这 12 个提交没有新功能，全是 0.2.2 兼容修补（`84cc522` rc.3 适配、`0d72015` 图标 slot、`e514e51`+`a05ad7e` projection cache 冷标题；`cf9a5bb` 只是定时任务改 `runtime-last-seen.json`）。仍暂不吸收：`84cc522` rc.3 适配、`e514e51`+`a05ad7e`（改造面大、收益仅冷启动） | 若日后跟进 rc.3，再按 §12 的冲突热区表逐步重放；`src/projection-hints.js` 未移植 |
 
 | 15 | 胶囊联动里 `arknights`（方舟观测）/ `persona`（月相引路）两种样式 | **v3.13.0 只做了近似**：`arknights` → 扫描线 + 框角 + `akAccent`；`persona` → 右侧月相环 + 蓝光。用户在 m01857 明确「先做 5 种常用映射，这两种以后再补」 | 正式移植要对齐 `dsh-netease-lyrics` 的 `clip-path` 切角（`polygon(10px 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%,0 10px)`）与 `persona` 的月相环渐变；改 `src/client/capsule-link.js` 的 `capsuleStyle()` 分支 + `CAPSULE_FOLLOW_READY` 即可，UI 会自动把「暂未移植」提示去掉 |
 
