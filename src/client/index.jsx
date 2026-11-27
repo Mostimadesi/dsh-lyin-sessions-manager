@@ -6963,7 +6963,7 @@ export function apply(ctx) {
   // 同一能力也尝试注册为客户端 cordis 服务 'lyinSessions'（可用则用）。
   try {
     const api = {
-      version: '3.17.0',
+      version: '3.18.0',
       openSession(id) {
         const target = id === null || id === undefined ? '' : String(id)
         if (!target) return false
