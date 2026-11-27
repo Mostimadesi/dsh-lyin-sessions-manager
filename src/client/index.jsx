@@ -4652,26 +4652,37 @@ const SIDEBAR_AUG_CSS = `
 .dsm-storage-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;color:var(--dsw-alias-label-primary)}
 /* v3.18.0：顶部统一导航（全部 / 活动 / 已归档 / 设置 / 回收站）。
    参考样式：一条圆角容器，选中项 = 胶囊底色 + 底部色条，紧凑靠左、不撑满。 */
-.dsm-navwrap{margin:0 0 12px;min-width:0}
-.dsm-nav{position:relative;display:inline-flex;flex-wrap:wrap;align-items:center;gap:2px;
-  max-width:100%;padding:4px;border-radius:12px;
-  border:1px solid color-mix(in srgb,var(--dsw-alias-border-l2) 78%,transparent);
+/* v3.18.1：按 ofm 插件的导航外观重做。它的关键是**两级**结构——
+   外层是一张毛玻璃卡片（blur + saturate + 大阴影 + 内高光），内层才是分段容器。
+   只做内层的话，在宿主的半透明面板上就只剩一圈细边框，显得平、和别处不搭。 */
+/* 不用 sticky：本面板不一定是最外层滚动容器，吸顶会盖住标题且无可预期收益。 */
+.dsm-navwrap{margin:0 0 12px;padding:8px;
+  border-radius:16px;
+  border:1px solid color-mix(in srgb,var(--dsw-alias-border-l2) 82%,transparent);
+  background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 62%,transparent);
+  backdrop-filter:blur(20px) saturate(160%);
+  -webkit-backdrop-filter:blur(20px) saturate(160%);
+  box-shadow:inset 0 1px 0 rgb(255 255 255 / 7%),0 8px 26px rgb(0 0 0 / 10%)}
+.dsm-nav{position:relative;display:flex;flex-wrap:wrap;align-items:center;gap:2px;
+  width:fit-content;max-width:100%;padding:3px;border-radius:13px;
+  border:1px solid color-mix(in srgb,var(--dsw-alias-border-l1) 80%,transparent);
   background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 62%,transparent);
   box-shadow:inset 0 1px 2px rgb(0 0 0 / 4%)}
-.dsm-navglider{position:absolute;top:0;left:0;border-radius:9px;pointer-events:none;
+.dsm-navglider{position:absolute;top:0;left:0;border-radius:10px;pointer-events:none;
   background:linear-gradient(150deg,color-mix(in srgb,var(--dsw-alias-bg-layer-3) 92%,transparent),color-mix(in srgb,var(--dsw-alias-bg-layer-2) 88%,transparent));
-  box-shadow:0 2px 8px rgb(0 0 0 / 12%),inset 0 1px 0 rgb(255 255 255 / 8%);
-  transition:transform .3s cubic-bezier(.22,.61,.36,1),width .3s cubic-bezier(.22,.61,.36,1)}
+  box-shadow:0 3px 10px rgb(0 0 0 / 14%),inset 0 1px 0 rgb(255 255 255 / 9%);
+  transition:transform .34s cubic-bezier(.22,.61,.36,1),width .34s cubic-bezier(.22,.61,.36,1),height .34s cubic-bezier(.22,.61,.36,1)}
 @media (prefers-reduced-motion:reduce){.dsm-navglider{transition:none}}
-.dsm-navtab{position:relative;z-index:1;appearance:none;display:inline-flex;align-items:baseline;gap:5px;
-  flex:none;padding:6px 13px;border:0;border-radius:9px;background:transparent;
-  color:var(--dsw-alias-label-secondary);font-family:inherit;font-size:12.5px;font-weight:600;
+.dsm-navtab{position:relative;z-index:1;appearance:none;display:inline-flex;align-items:baseline;gap:6px;
+  flex:none;padding:6px 13px;border:0;border-radius:10px;background:transparent;
+  color:var(--dsw-alias-label-secondary);font-family:inherit;font-size:12px;font-weight:600;
   white-space:nowrap;cursor:pointer;transition:color .2s ease}
 .dsm-navtab:hover{color:var(--dsw-alias-label-primary)}
 .dsm-navtab-on{color:var(--dsw-alias-label-primary)}
 /* 底部色条：与参考实现同款，选中项的视觉主线。 */
 .dsm-navtab-on::after{content:'';position:absolute;left:13px;right:13px;bottom:2px;height:2px;border-radius:2px;
-  background:var(--dsw-alias-state-business-primary);opacity:.9}
+  background:var(--dsw-alias-state-business-primary);opacity:.85;
+  transition:opacity .18s cubic-bezier(.32,.72,0,1)}
 .dsm-navtab-num{font-variant-numeric:tabular-nums;font-weight:600;font-size:11px;
   color:var(--dsw-alias-label-tertiary)}
 .dsm-navtab-on .dsm-navtab-num{color:var(--dsw-alias-label-secondary)}
@@ -4692,25 +4703,23 @@ const SIDEBAR_AUG_CSS = `
 @media (prefers-reduced-motion:reduce){.dsm-settings-page{animation:none}}
 /* 导航条：分段控件 + 滑块指示器（与 ofm 插件的设置页同一套做法）。
    滑块用绝对定位 + transform 移动，切换时是横向滑动而不是闪一下。 */
-.dsm-settings-nav{position:relative;display:flex;flex-wrap:wrap;gap:2px;padding:4px;border-radius:13px;
-  border:1px solid color-mix(in srgb,var(--dsw-alias-border-l2) 80%,transparent);
-  background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 72%,transparent);
-  box-shadow:inset 0 1px 2px rgb(0 0 0 / 5%);min-width:0}
-.dsm-settings-glider{position:absolute;top:4px;left:4px;border-radius:9px;pointer-events:none;
-  background:linear-gradient(150deg,color-mix(in srgb,var(--dsw-alias-bg-layer-3) 94%,transparent),color-mix(in srgb,var(--dsw-alias-bg-layer-2) 90%,transparent));
-  box-shadow:0 2px 8px rgb(0 0 0 / 14%),inset 0 1px 0 rgb(255 255 255 / 9%);
-  transition:transform .3s cubic-bezier(.22,.61,.36,1),width .3s cubic-bezier(.22,.61,.36,1)}
-@media (prefers-reduced-motion:reduce){.dsm-settings-glider{transition:none}}
-.dsm-settings-tab{position:relative;z-index:1;appearance:none;flex:1 1 auto;min-width:0;
-  display:inline-flex;align-items:center;justify-content:center;gap:6px;
-  height:32px;padding:0 14px;border:none;border-radius:9px;background:transparent;
-  color:var(--dsw-alias-label-secondary);font-family:inherit;font-size:12.5px;font-weight:500;
+/* 设置页内的分组导航：与顶部共用同一套分段容器语言（见 .dsm-nav 上方注释）。 */
+.dsm-settings-nav{position:relative;display:flex;flex-wrap:wrap;gap:2px;padding:3px;border-radius:13px;
+  width:fit-content;max-width:100%;min-width:0;
+  border:1px solid color-mix(in srgb,var(--dsw-alias-border-l1) 80%,transparent);
+  background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 62%,transparent);
+  box-shadow:inset 0 1px 2px rgb(0 0 0 / 4%)}
+.dsm-settings-tab{position:relative;z-index:1;appearance:none;flex:none;
+  display:inline-flex;align-items:baseline;gap:6px;
+  padding:6px 13px;border:none;border-radius:10px;background:transparent;
+  color:var(--dsw-alias-label-secondary);font-family:inherit;font-size:12px;font-weight:600;
   white-space:nowrap;cursor:pointer;transition:color .2s ease}
 .dsm-settings-tab:hover{color:var(--dsw-alias-label-primary)}
-.dsm-settings-tab-on{color:var(--dsw-alias-label-primary);font-weight:600}
+.dsm-settings-tab-on{color:var(--dsw-alias-label-primary)}
+/* 与顶部导航一致：选中项底部色条。 */
+.dsm-settings-tab-on::after{content:'';position:absolute;left:13px;right:13px;bottom:2px;height:2px;border-radius:2px;
+  background:var(--dsw-alias-state-business-primary);opacity:.85}
 .dsm-settings-tab:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:1px}
-.dsm-settings-tab svg{width:14px;height:14px;flex:none;opacity:.85}
-.dsm-settings-tab-on svg{opacity:1}
 /* 每页的工具行：不再用维护栏的两列 grid，改成可换行的横向排布。 */
 .dsm-settings-tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0;padding:10px 12px;
   border-radius:11px;border:1px solid color-mix(in srgb,var(--dsw-alias-border-l1) 85%,transparent);
