@@ -20,6 +20,15 @@ import { CAPSULE_COLOR_KEY, CAPSULE_DISPLAY_KEY, CAPSULE_EVENTS, CAPSULE_NOTICE_
 
 export const inject = ['slots']
 
+// v3.17.0：面板内设置菜单的分组。顺序 = 用户从「最常改」到「最少动」的直觉顺序；
+// 「宿主集成」放最后，因为那三项都改本机配置文件、且 MCP 改完还要重启。
+const DSM_SETTINGS_GROUPS = [
+  { id: 'appearance', label: '外观' },
+  { id: 'archive', label: '归档' },
+  { id: 'storage', label: '存储与标签' },
+  { id: 'host', label: '宿主集成' },
+]
+
 const PANEL_PREFS_KEY = 'dsm-panel-prefs-v1'
 function loadPanelPrefs() {
   try { return JSON.parse(localStorage.getItem(PANEL_PREFS_KEY) || '{}') || {} } catch (e) { return {} }
@@ -1628,6 +1637,12 @@ function SessionPanel({ workspacesSvc }) {
   // v3.15.0 模型路由：读写 llm-router / subagent-router 两个插件的 settings.json。
   // 与 MCP / profile 那类不同，它们靠 mtime 指纹 5 秒轮询，改完不用重启。
   // `routerTab` 是同一个弹层里的两个分区：'llm' | 'subagent'。
+  // v3.17.0：顶部维护栏收成一个「设置」入口，低频配置全部进这个面板内的设置菜单。
+  // 取值 = 当前打开的分组（'appearance' | 'archive' | 'storage' | 'host'），
+  // null = 菜单关闭。用它替代原先 9 个独立的 open 状态做互斥；下面那些
+  // qaStyleOpen / mcpOpen … 仍保留，因为要驱动各自的 sheet 内容。
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsTab, setSettingsTab] = useState('appearance')
   const [routerOpen, setRouterOpen] = useState(false)
   const [routerTab, setRouterTab] = useState('llm')
   const [routerSnap, setRouterSnap] = useState(null)
@@ -2983,113 +2998,128 @@ function SessionPanel({ workspacesSvc }) {
           </div>
 
 
-          {/* 维护栏是面板级工具，与当前查看哪一组会话无关，故所有视图都显示。 */}
+          {/* v3.17.0：维护栏收成一个「设置」入口。原先这里是 9 个常驻按钮
+              （存储占用 / 标签管理 / 自动归档 / 工作区归档 / 面板外观 + MCP / Skill /
+              模型路由），低频配置把会话面板顶部挤得很满。现在这些**全部**搬进面板
+              自己的设置菜单（`settingsOpen`），顶部只留这一个入口。
+              与管理会话直接相关的操作（筛选、批量选择）仍在原处，不受影响。 */}
           <div className="maint-bar">
-            <div className="maint-group">
-              <button type="button" className="archv-btn" aria-expanded={storageOpen} onClick={() => { const next = !storageOpen; setStorageOpen(next); if (next && (!storage || storageDirty.current) && !storageBusy) loadStorage() }}>
-                存储占用{storage ? ` · ${fmtBytes(storage.totalBytes) || '0 B'}` : ''}
-              </button>
-              {/* 标签管理：面板级低频工具（v3.7.x 从筛选行移入维护栏，存储占用右边）；不新增顶层视图 tab（UI 红线）。 */}
-              <button
-                type="button"
-                className="archv-btn"
-                aria-expanded={openTagMgr}
-                disabled={!tagsReady && !openTagMgr}
-                title={tagsReady ? '新建 / 重命名 / 合并 / 删除标签' : tagsBlockedTitle}
-                onClick={() => { setOpenTagMgr(!openTagMgr); setRenamingTagId(null) }}
-              >标签管理{tagsReady && tagDefs.length ? ` (${tagDefs.length})` : ''}</button>
-              <button type="button" className={'archv-btn' + (aa.settings.inactiveDays ? ' archv-go' : '')} aria-expanded={aaOpen} onClick={() => setAaOpen(!aaOpen)}>
-                自动归档{aa.settings.inactiveDays ? `：${aa.settings.inactiveDays} 天未活跃` : '：未启用'}
-              </button>
-              {aa.lastRunAt ? <span className="maint-note">上次检查 {fmtDate(aa.lastRunAt)}，归档 {aa.lastArchivedCount} 个</span> : <span className="maint-note">尚未检查</span>}
-              {/* v3.12.0 工作区归档：与「自动归档」并列但语义不同——自动归档按闲置天数
-                  归档会话，这里只把整个工作区从侧栏和面板列表里折叠起来，不动会话自身归档状态。 */}
-              <button
-                type="button"
-                className={'archv-btn' + (wsArch.keys.length ? ' archv-go' : '')}
-                aria-expanded={wsArchOpen}
-                title="把整个工作区从侧栏与列表里折叠起来（只做可见性，会话归档状态不变）"
-                onClick={() => {
-                  const next = !wsArchOpen
-                  setWsArchOpen(next)
-                  if (next) loadWsArch()
-                }}
-              >
-                工作区归档{wsArch.keys.length ? `：${wsArch.keys.length} 个` : '：无'}
-              </button>
-              {/* v0.2.2 快捷面板外观：预设 + 细参数（netease-lyrics 同款模式）。 */}
-              <button type="button" className="archv-btn" aria-expanded={qaStyleOpen} title="快捷面板的主题预设与圆角/模糊/不透明度/宽度" onClick={() => setQaStyleOpen(!qaStyleOpen)}>
-                面板外观
-              </button>
-            </div>
-            {/* 右侧分组：宿主集成类工具（写 profile / 写 skill 文件），与会话日常维护分开。 */}
-            <div className="maint-group maint-right">
-              {/* v0.5.5：MCP 服务器开关（最小实现，直接改 profile 的 cordis.patch.yml）。 */}
-              <button
-                type="button"
-                className="archv-btn"
-                aria-expanded={mcpOpen}
-                title="启用 / 停用本机 profile 里的 MCP 服务器（重启 DSH 后生效）"
-                onClick={() => {
-                  const next = !mcpOpen
-                  setMcpOpen(next)
-                  if (!next) return
-                  setMcpBusy(true)
-                  setMcpErr('')
-                  setMcpNote('')
-                  getJSON('/archived-sessions/mcp/rows')
-                    .then((d) => setMcpRows(Array.isArray(d.rows) ? d.rows : []))
-                    .catch((e) => setMcpErr(String((e && e.message) || e)))
-                    .finally(() => setMcpBusy(false))
-                }}
-              >MCP 服务器</button>
-              {/* v0.6.1：skill 列表（三态开关 + 导入导出），改 SKILL.md 的 frontmatter，宿主即时生效。 */}
-              <button
-                type="button"
-                className="archv-btn"
-                aria-expanded={skillOpen}
-                title="启用 / 部分停用 / 停用本机扫描到的 skill，也可导出 zip、导入、删除"
-                onClick={() => {
-                  const next = !skillOpen
-                  setSkillOpen(next)
-                  if (!next) return
-                  setSkillBusy(true)
-                  setSkillErr('')
-                  setSkillNote('')
-                  getJSON('/archived-sessions/skills/list')
-                    .then((d) => {
-                      setSkillData(d)
-                      const writable = (d.roots || []).filter((r) => r.scope !== 'bundled')
-                      setSkillImportRoot((prev) => prev || (writable[0] && writable[0].path) || '')
-                    })
-                    .catch((e) => setSkillErr(String((e && e.message) || e)))
-                    .finally(() => setSkillBusy(false))
-                }}
-              >Skill 列表{skillData && Array.isArray(skillData.skills) ? ` (${skillData.skills.length})` : ''}</button>
-              {/* v3.15.0 模型路由：两个插件的 settings.json 都靠指纹轮询，改完 5 秒生效、
-                  不用重启 —— 与左边两个按钮（改 profile / 改 SKILL.md）语义不同。 */}
-              <button
-                type="button"
-                className="archv-btn"
-                aria-expanded={routerOpen}
-                title="编辑 llm-router 的候选链与 subagent-router 的子代理候选（改完 5 秒内自生效，不用重启）"
-                onClick={() => {
-                  const next = !routerOpen
-                  setRouterOpen(next)
-                  if (!next) return
-                  setRouterBusy(true)
-                  setRouterErr('')
-                  setRouterNote('')
-                  setRouterEdit('')
-                  setRouterNew({ open: false, id: '', name: '', chain: '' })
-                  postJSON('/archived-sessions/router/snapshot', {})
-                    .then((d) => setRouterSnap(d))
-                    .catch((e) => setRouterErr(String((e && e.message) || e)))
-                    .finally(() => setRouterBusy(false))
-                }}
-              >模型路由{routerSnap && Array.isArray(routerSnap.llm && routerSnap.llm.routes) ? ` (${routerSnap.llm.routes.length})` : ''}</button>
-            </div>
+            <button
+              type="button"
+              className="archv-btn maint-settings-btn"
+              aria-expanded={settingsOpen}
+              title="外观 / 归档 / 存储 / 标签 / MCP / Skill / 模型路由"
+              onClick={() => setSettingsOpen(!settingsOpen)}
+            >⚙ 设置</button>
           </div>
+
+          {/* v3.17.0：设置菜单的分组导航。每组下挂着原来那几个 sheet：
+              appearance = 面板外观；archive = 自动归档 + 工作区归档；
+              storage = 存储占用 + 标签管理；host = MCP / Skill / 模型路由。
+              切组只换「显示哪一组」，组内各 sheet 仍是原本的按钮展开/收起 ——
+              不预置默认打开项，避免一进设置就多打一次网络请求。 */}
+          {settingsOpen && (
+            <div className="dsm-settings-nav" role="tablist" aria-label="设置分组">
+              {DSM_SETTINGS_GROUPS.map((g) => (
+                <button
+                  key={g.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={settingsTab === g.id}
+                  className={'dsm-settings-tab' + (settingsTab === g.id ? ' dsm-settings-tab-on' : '')}
+                  onClick={() => setSettingsTab(g.id)}
+                >{g.label}</button>
+              ))}
+            </div>
+          )}
+          {/* v3.17.0：分组内的具体工具按钮。都是原先维护栏上那几个，只是按组归类
+              并只在对应分组展开 —— 顶部因此回到「一个设置按钮」的清爽状态。 */}
+          {settingsOpen && (
+            <div className="maint-bar dsm-settings-tools">
+              {settingsTab === 'appearance' && (
+                <div className="maint-group">
+                  <button type="button" className="archv-btn" aria-expanded={qaStyleOpen} title="快捷面板的主题预设与圆角/模糊/不透明度/宽度" onClick={() => setQaStyleOpen(!qaStyleOpen)}>
+                    面板外观
+                  </button>
+                </div>
+              )}
+              {settingsTab === 'archive' && (
+                <div className="maint-group">
+                  <button type="button" className={'archv-btn' + (aa.settings.inactiveDays ? ' archv-go' : '')} aria-expanded={aaOpen} onClick={() => setAaOpen(!aaOpen)}>
+                    自动归档{aa.settings.inactiveDays ? `：${aa.settings.inactiveDays} 天未活跃` : '：未启用'}
+                  </button>
+                  {aa.lastRunAt ? <span className="maint-note">上次检查 {fmtDate(aa.lastRunAt)}，归档 {aa.lastArchivedCount} 个</span> : <span className="maint-note">尚未检查</span>}
+                  <button
+                    type="button"
+                    className={'archv-btn' + (wsArch.keys.length ? ' archv-go' : '')}
+                    aria-expanded={wsArchOpen}
+                    title="把整个工作区从侧栏与列表里折叠起来（只做可见性，会话归档状态不变）"
+                    onClick={() => {
+                      const next = !wsArchOpen
+                      setWsArchOpen(next)
+                      if (next) loadWsArch()
+                    }}
+                  >
+                    工作区归档{wsArch.keys.length ? `：${wsArch.keys.length} 个` : '：无'}
+                  </button>
+                </div>
+              )}
+              {settingsTab === 'storage' && (
+                <div className="maint-group">
+                  <button type="button" className="archv-btn" aria-expanded={storageOpen} onClick={() => { const next = !storageOpen; setStorageOpen(next); if (next && (!storage || storageDirty.current) && !storageBusy) loadStorage() }}>
+                    存储占用{storage ? ` · ${fmtBytes(storage.totalBytes) || '0 B'}` : ''}
+                  </button>
+                  <button
+                    type="button"
+                    className="archv-btn"
+                    aria-expanded={openTagMgr}
+                    disabled={!tagsReady && !openTagMgr}
+                    title={tagsReady ? '新建 / 重命名 / 合并 / 删除标签' : tagsBlockedTitle}
+                    onClick={() => { setOpenTagMgr(!openTagMgr); setRenamingTagId(null) }}
+                  >标签管理{tagsReady && tagDefs.length ? ` (${tagDefs.length})` : ''}</button>
+                </div>
+              )}
+              {settingsTab === 'host' && (
+                <div className="maint-group">
+                  <button type="button" className="archv-btn" aria-expanded={mcpOpen} title="启用 / 停用本机 profile 里的 MCP 服务器（重启 DSH 后生效）" onClick={() => {
+                    const next = !mcpOpen
+                    setMcpOpen(next)
+                    if (!next) return
+                    setMcpBusy(true); setMcpErr(''); setMcpNote('')
+                    getJSON('/archived-sessions/mcp/rows')
+                      .then((d) => setMcpRows(Array.isArray(d.rows) ? d.rows : []))
+                      .catch((e) => setMcpErr(String((e && e.message) || e)))
+                      .finally(() => setMcpBusy(false))
+                  }}>MCP 服务器</button>
+                  <button type="button" className="archv-btn" aria-expanded={skillOpen} title="启用 / 部分停用 / 停用本机扫描到的 skill，也可导出 zip、导入、删除" onClick={() => {
+                    const next = !skillOpen
+                    setSkillOpen(next)
+                    if (!next) return
+                    setSkillBusy(true); setSkillErr(''); setSkillNote('')
+                    getJSON('/archived-sessions/skills/list')
+                      .then((d) => {
+                        setSkillData(d)
+                        const writable = (d.roots || []).filter((r) => r.scope !== 'bundled')
+                        setSkillImportRoot((prev) => prev || (writable[0] && writable[0].path) || '')
+                      })
+                      .catch((e) => setSkillErr(String((e && e.message) || e)))
+                      .finally(() => setSkillBusy(false))
+                  }}>Skill 列表{skillData && Array.isArray(skillData.skills) ? ` (${skillData.skills.length})` : ''}</button>
+                  <button type="button" className="archv-btn" aria-expanded={routerOpen} title="编辑 llm-router 的候选链与 subagent-router 的子代理候选（改完 5 秒内自生效，不用重启）" onClick={() => {
+                    const next = !routerOpen
+                    setRouterOpen(next)
+                    if (!next) return
+                    setRouterBusy(true); setRouterErr(''); setRouterNote(''); setRouterEdit('')
+                    setRouterNew({ open: false, id: '', name: '', chain: '' })
+                    postJSON('/archived-sessions/router/snapshot', {})
+                      .then((d) => setRouterSnap(d))
+                      .catch((e) => setRouterErr(String((e && e.message) || e)))
+                      .finally(() => setRouterBusy(false))
+                  }}>模型路由{routerSnap && Array.isArray(routerSnap.llm && routerSnap.llm.routes) ? ` (${routerSnap.llm.routes.length})` : ''}</button>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* v0.2.2 快捷面板外观 sheet：预设下拉 + 四个滑杆，改动即时生效并
               持久化（localStorage['dsm-qa-style-v1']）；「恢复默认」清空细参数
@@ -3097,7 +3127,7 @@ function SessionPanel({ workspacesSvc }) {
               localStorage，writeQaStyle 后 React 不知道要重渲染 → select 显示
               卡在旧值（外观其实已变）。改为受控组件：qaStyleTick state 随每
               次 write 递增，强制重读最新偏好。 */}
-          {qaStyleOpen && (() => {
+          {settingsOpen && settingsTab === 'appearance' && qaStyleOpen && (() => {
             void qaStyleTick // 依赖标记：tick 变化时本 IIFE 重渲染重读 localStorage
             const qaPrefs = readQaStyle()
             const setPref = (patch) => { writeQaStyle(patch); setQaStyleTick((n) => n + 1) }
@@ -3173,7 +3203,7 @@ function SessionPanel({ workspacesSvc }) {
 
           {/* v0.5.5 MCP 服务器开关 sheet：列出 profile 里的 MCP 行，一键启停。
               改动写 cordis.patch.yml（服务端先落 .bak-mcpui-* 备份），重启 DSH 生效。 */}
-          {mcpOpen && (
+          {settingsOpen && settingsTab === 'host' && mcpOpen && (
             <div className="mv-sheet" aria-label="MCP 服务器">
               <div className="mv-sheet-head">
                 <h3 className="mv-sheet-title">MCP 服务器</h3>
@@ -3224,7 +3254,7 @@ function SessionPanel({ workspacesSvc }) {
               并在响应里带回最新 snapshot，所以不用另外 refresh。
               文案要反复强调「不用重启」——这两行旁边的按钮（MCP / Skill）都需要
               重启或等下一个 step，混在一起很容易让人以为这里也要。 */}
-          {routerOpen && (() => {
+          {settingsOpen && settingsTab === 'host' && routerOpen && (() => {
             const snap = routerSnap || {}
             const llm = snap.llm || {}
             const sub = snap.subagent || {}
@@ -3438,7 +3468,7 @@ function SessionPanel({ workspacesSvc }) {
           {/* v0.6.1 skill 列表 sheet：三态开关写 frontmatter（服务端先落 .bak-skill-* 备份），
               宿主 watch 到文件变化后下一次 agent step 即生效，不需要重启。
               只列 skillRoots() 扫到的目录；包内（node_modules / bundled）标为只读。 */}
-          {skillOpen && (
+          {settingsOpen && settingsTab === 'host' && skillOpen && (
             <div className="mv-sheet" aria-label="Skill 列表">
               <div className="mv-sheet-head">
                 <h3 className="mv-sheet-title">Skill 列表{skillData ? ` · ${skillData.skills.length}` : ''}</h3>
@@ -3607,7 +3637,7 @@ function SessionPanel({ workspacesSvc }) {
           {/* T4 标签管理 sheet：照自动归档/待移动队列的 mv-sheet 先例。
               每行 = 名字 / 用量 / 重命名（内联输入）/ 并入 select + 确认 / 删除。
               删除确认文案含「只删标签，不会删除会话」红线（logic.tagDeleteConfirm）。 */}
-          {openTagMgr && (
+          {settingsOpen && settingsTab === 'storage' && openTagMgr && (
             <div className="mv-sheet" aria-label="标签管理">
               <div className="mv-sheet-head">
                 <h3 className="mv-sheet-title">标签管理 · {tagDefs.length}</h3>
@@ -3705,7 +3735,7 @@ function SessionPanel({ workspacesSvc }) {
               ))}
             </div>
           )}
-          {aaOpen && (
+          {settingsOpen && settingsTab === 'archive' && aaOpen && (
             <div className="mv-sheet" aria-label="自动归档设置">
               <div className="mv-sheet-head">
                 <h3 className="mv-sheet-title">自动归档</h3>
@@ -3732,7 +3762,7 @@ function SessionPanel({ workspacesSvc }) {
               </div>
             </div>
           )}
-          {wsArchOpen && (
+          {settingsOpen && settingsTab === 'archive' && wsArchOpen && (
             <div className="mv-sheet" aria-label="工作区归档">
               <div className="mv-sheet-head">
                 <h3 className="mv-sheet-title">工作区归档</h3>
@@ -3769,7 +3799,7 @@ function SessionPanel({ workspacesSvc }) {
               </div>
             </div>
           )}
-          {storageOpen && (
+          {settingsOpen && settingsTab === 'storage' && storageOpen && (
             <div className="mv-sheet" aria-label="存储占用">
               <div className="mv-sheet-head">
                 <h3 className="mv-sheet-title">存储占用</h3>
@@ -4577,6 +4607,18 @@ const SIDEBAR_AUG_CSS = `
 .maint-bar{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:10px 14px;margin:0 0 8px}
 .maint-group{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0}
 .maint-right{display:flex;flex-direction:column;align-items:stretch;gap:8px;min-width:104px}
+/* v3.17.0：宿主集成组默认收起。展开后内部是纵向排列，别把父级 grid 撑宽。 */
+/* v3.17.0：面板内设置菜单。顶部只剩一个「⚙ 设置」按钮，
+   点开后先出一行分组 tab，再出该组的工具按钮与对应 sheet。 */
+.maint-settings-btn{justify-self:start;white-space:nowrap}
+/* 顶部只剩一个按钮后，两列 grid 会把它拉满整行：改成不再分列。 */
+.maint-bar:has(> .maint-settings-btn){display:flex;align-items:center;justify-content:flex-start}
+.dsm-settings-nav{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px;padding:4px;border-radius:10px;background:var(--dsw-alias-fill-subtle)}
+.dsm-settings-tab{appearance:none;flex:1 1 auto;min-width:0;height:28px;padding:0 12px;border:none;border-radius:7px;background:transparent;color:var(--dsw-alias-label-secondary);font-family:inherit;font-size:12px;white-space:nowrap;cursor:pointer}
+.dsm-settings-tab:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
+.dsm-settings-tab-on{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);font-weight:600}
+.dsm-settings-tab:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:1px}
+.dsm-settings-tools{grid-template-columns:minmax(0,1fr);margin-bottom:8px}
 .maint-right .archv-btn{white-space:nowrap}
 @media (max-width:640px){.maint-bar{display:flex;flex-direction:column;align-items:stretch}.maint-right{flex-direction:row;flex-wrap:wrap;justify-content:flex-start}}
 .maint-note{font-size:11px;color:var(--dsw-alias-label-tertiary)}
@@ -6793,6 +6835,7 @@ export function apply(ctx) {
       (props) => <SessionPanel {...props} workspacesSvc={workspacesSvc} />,
     ),
   )
+
   // v0.2.3：footer 次选入口按用户要求移除（全局面板入口已足够）；组件与注册
   // 代码一并删除，避免死代码。
   try {
@@ -6822,7 +6865,7 @@ export function apply(ctx) {
   // 同一能力也尝试注册为客户端 cordis 服务 'lyinSessions'（可用则用）。
   try {
     const api = {
-      version: '3.16.0',
+      version: '3.17.0',
       openSession(id) {
         const target = id === null || id === undefined ? '' : String(id)
         if (!target) return false
