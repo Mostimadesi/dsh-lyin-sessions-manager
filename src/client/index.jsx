@@ -23,11 +23,45 @@ export const inject = ['slots']
 // v3.17.0：面板内设置菜单的分组。顺序 = 用户从「最常改」到「最少动」的直觉顺序；
 // 「宿主集成」放最后，因为那三项都改本机配置文件、且 MCP 改完还要重启。
 const DSM_SETTINGS_GROUPS = [
-  { id: 'appearance', label: '外观' },
-  { id: 'archive', label: '归档' },
-  { id: 'storage', label: '存储与标签' },
-  { id: 'host', label: '宿主集成' },
+  { id: 'appearance', label: '外观', icon: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zm0 3.2a5.8 5.8 0 1 1 0 11.6 5.8 5.8 0 0 1 0-11.6z' },
+  { id: 'archive', label: '归档', icon: 'M3 5h18v4H3zM5 9h14v11H5zm4 4h6v1.6H9z' },
+  { id: 'storage', label: '存储与标签', icon: 'M12 3l8 4.5v9L12 21l-8-4.5v-9zM12 5.2L6.4 8.4 12 11.6l5.6-3.2z' },
+  { id: 'host', label: '宿主集成', icon: 'M4 6h16v4H4zm0 8h16v4H4zm3-6v.01M7 14v.01' },
 ]
+
+// v3.17.0：设置导航的滑块指示器。绝对定位 + transform 横向移动，切换时是滑动
+// 而不是整块闪一下；位置取自被选中 tab 的 offsetLeft/offsetWidth（导航会换行，
+// 所以纵向 top 也一并跟随，避免第二行时滑块停在第一行）。
+function SettingsNavGlider({ tab }) {
+  const [box, setBox] = useState(null)
+  useEffect(() => {
+    const pick = () => {
+      const root = document.querySelector('.dsm-settings-nav')
+      const node = root && root.querySelector('[data-dsm-tab="' + tab + '"]')
+      if (!node) { setBox(null); return }
+      setBox({ left: node.offsetLeft, width: node.offsetWidth, top: node.offsetTop })
+    }
+    pick()
+    let ro = null
+    try {
+      // 字体加载完成 / 语言切换都会改变宽度，靠 ResizeObserver 兜住。
+      if (typeof ResizeObserver === 'function') { ro = new ResizeObserver(pick); ro.observe(document.body) }
+    } catch (e) { /* 无 ResizeObserver：只靠 resize 事件 */ }
+    window.addEventListener('resize', pick)
+    return () => {
+      window.removeEventListener('resize', pick)
+      if (ro) { try { ro.disconnect() } catch (e) { /* 已断开 */ } }
+    }
+  }, [tab])
+  if (!box) return null
+  return (
+    <span
+      className="dsm-settings-glider"
+      aria-hidden="true"
+      style={{ transform: 'translateX(' + box.left + 'px)', width: box.width + 'px', top: box.top + 'px' }}
+    />
+  )
+}
 
 const PANEL_PREFS_KEY = 'dsm-panel-prefs-v1'
 function loadPanelPrefs() {
@@ -3019,17 +3053,24 @@ function SessionPanel({ workspacesSvc }) {
           {settingsOpen && (
             <section className="dsm-settings-page" aria-label="插件设置">
               <div className="dsm-settings-nav" role="tablist" aria-label="设置导航">
-              {DSM_SETTINGS_GROUPS.map((g) => (
-                <button
-                  key={g.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={settingsTab === g.id}
-                  className={'dsm-settings-tab' + (settingsTab === g.id ? ' dsm-settings-tab-on' : '')}
-                  onClick={() => setSettingsTab(g.id)}
-                >{g.label}</button>
-              ))}
-            </div>
+                <SettingsNavGlider tab={settingsTab} />
+                {DSM_SETTINGS_GROUPS.map((g) => (
+                  <button
+                    key={g.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={settingsTab === g.id}
+                    className={'dsm-settings-tab' + (settingsTab === g.id ? ' dsm-settings-tab-on' : '')}
+                    data-dsm-tab={g.id}
+                    onClick={() => setSettingsTab(g.id)}
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d={g.icon} />
+                    </svg>
+                    <span>{g.label}</span>
+                  </button>
+                ))}
+              </div>
               {/* v3.17.0：分组内的具体工具按钮。都是原先维护栏上那几个，只是按组归类
                    并只在对应分组展开 —— 顶部因此回到「一个设置按钮」的清爽状态。 */}
               <div className="maint-bar dsm-settings-tools">
@@ -3116,7 +3157,6 @@ function SessionPanel({ workspacesSvc }) {
                 </div>
               )}
             </div>
-          )}
 
           {/* v0.2.2 快捷面板外观 sheet：预设下拉 + 四个滑杆，改动即时生效并
               持久化（localStorage['dsm-qa-style-v1']）；「恢复默认」清空细参数
@@ -4612,18 +4652,36 @@ const SIDEBAR_AUG_CSS = `
 .maint-settings-btn{justify-self:start;white-space:nowrap}
 /* 顶部只剩一个按钮后，两列 grid 会把它拉满整行：改成不再分列。 */
 .maint-bar:has(> .maint-settings-btn){display:flex;align-items:center;justify-content:flex-start}
-.dsm-settings-page{display:flex;flex-direction:column;gap:12px;min-width:0;animation:dsm-page-in .18s ease-out}
-@keyframes dsm-page-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.dsm-settings-page{display:flex;flex-direction:column;gap:14px;min-width:0;animation:dsm-page-in .2s cubic-bezier(.16,1,.3,1)}
+@keyframes dsm-page-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){.dsm-settings-page{animation:none}}
-/* 导航条：独立成一行的 segmented 容器。 */
-.dsm-settings-nav{display:flex;flex-wrap:wrap;gap:2px;padding:3px;border-radius:10px;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-fill-subtle);min-width:0}
-.dsm-settings-tab{appearance:none;flex:1 1 auto;min-width:0;height:30px;padding:0 14px;border:none;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);font-family:inherit;font-size:12.5px;font-weight:500;white-space:nowrap;cursor:pointer;transition:background-color .15s ease,color .15s ease}
-.dsm-settings-tab:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}
-.dsm-settings-tab-on{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);font-weight:600;box-shadow:0 1px 3px rgb(0 0 0 / 12%)}
+/* 导航条：分段控件 + 滑块指示器（与 ofm 插件的设置页同一套做法）。
+   滑块用绝对定位 + transform 移动，切换时是横向滑动而不是闪一下。 */
+.dsm-settings-nav{position:relative;display:flex;flex-wrap:wrap;gap:2px;padding:4px;border-radius:13px;
+  border:1px solid color-mix(in srgb,var(--dsw-alias-border-l2) 80%,transparent);
+  background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 72%,transparent);
+  box-shadow:inset 0 1px 2px rgb(0 0 0 / 5%);min-width:0}
+.dsm-settings-glider{position:absolute;top:4px;left:4px;border-radius:9px;pointer-events:none;
+  background:linear-gradient(150deg,color-mix(in srgb,var(--dsw-alias-bg-layer-3) 94%,transparent),color-mix(in srgb,var(--dsw-alias-bg-layer-2) 90%,transparent));
+  box-shadow:0 2px 8px rgb(0 0 0 / 14%),inset 0 1px 0 rgb(255 255 255 / 9%);
+  transition:transform .3s cubic-bezier(.22,.61,.36,1),width .3s cubic-bezier(.22,.61,.36,1)}
+@media (prefers-reduced-motion:reduce){.dsm-settings-glider{transition:none}}
+.dsm-settings-tab{position:relative;z-index:1;appearance:none;flex:1 1 auto;min-width:0;
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  height:32px;padding:0 14px;border:none;border-radius:9px;background:transparent;
+  color:var(--dsw-alias-label-secondary);font-family:inherit;font-size:12.5px;font-weight:500;
+  white-space:nowrap;cursor:pointer;transition:color .2s ease}
+.dsm-settings-tab:hover{color:var(--dsw-alias-label-primary)}
+.dsm-settings-tab-on{color:var(--dsw-alias-label-primary);font-weight:600}
 .dsm-settings-tab:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:1px}
-/* 每页的工具行：不再用维护栏的两列 grid，改成普通横向排布。 */
-.dsm-settings-tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0}
-.dsm-settings-tools .maint-group{flex-wrap:wrap}
+.dsm-settings-tab svg{width:14px;height:14px;flex:none;opacity:.85}
+.dsm-settings-tab-on svg{opacity:1}
+/* 每页的工具行：不再用维护栏的两列 grid，改成可换行的横向排布。 */
+.dsm-settings-tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0;padding:10px 12px;
+  border-radius:11px;border:1px solid color-mix(in srgb,var(--dsw-alias-border-l1) 85%,transparent);
+  background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 55%,transparent)}
+.dsm-settings-tools .maint-group{flex-wrap:wrap;gap:8px}
+.dsm-settings-tools:empty{display:none}
 .maint-right .archv-btn{white-space:nowrap}
 @media (max-width:640px){.maint-bar{display:flex;flex-direction:column;align-items:stretch}.maint-right{flex-direction:row;flex-wrap:wrap;justify-content:flex-start}}
 .maint-note{font-size:11px;color:var(--dsw-alias-label-tertiary)}
