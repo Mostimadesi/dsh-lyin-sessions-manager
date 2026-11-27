@@ -2980,7 +2980,7 @@ function SessionPanel({ workspacesSvc }) {
         </div>
       ) : (
         <>
-          <div className={'sess-fwrap' + (moreOpen ? ' sess-fmore-open' : '') + (filter === 'starred' || filter === 'review' || filter === 'empty' || filter === 'trash' ? ' sess-fsec-on' : '')}>
+          {!settingsOpen && <div className={'sess-fwrap' + (moreOpen ? ' sess-fmore-open' : '') + (filter === 'starred' || filter === 'review' || filter === 'empty' || filter === 'trash' ? ' sess-fsec-on' : '')}>
             <div className="sess-filter" role="tablist" aria-label="会话筛选">
               <button type="button" role="tab" aria-selected={filter === 'all'} className={'sess-fbtn' + (filter === 'all' ? ' sess-fbtn-on' : '')} onClick={() => { setFilter('all'); clearSel(); setConfirmBatch(false) }}>全部 ({totalTopCount})</button>
               <button type="button" role="tab" aria-selected={filter === 'active'} className={'sess-fbtn' + (filter === 'active' ? ' sess-fbtn-on' : '')} onClick={() => { setFilter('active'); clearSel(); setConfirmBatch(false) }}>活动 ({activeList.length})</button>
@@ -2995,8 +2995,7 @@ function SessionPanel({ workspacesSvc }) {
                 <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M4 2l4 4-4 4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>
               </button>
             </div>
-          </div>
-
+          </div>}
 
           {/* v3.17.0：维护栏收成一个「设置」入口。原先这里是 9 个常驻按钮
               （存储占用 / 标签管理 / 自动归档 / 工作区归档 / 面板外观 + MCP / Skill /
@@ -3006,20 +3005,20 @@ function SessionPanel({ workspacesSvc }) {
           <div className="maint-bar">
             <button
               type="button"
-              className="archv-btn maint-settings-btn"
-              aria-expanded={settingsOpen}
-              title="外观 / 归档 / 存储 / 标签 / MCP / Skill / 模型路由"
+              className={'archv-btn maint-settings-btn' + (settingsOpen ? ' archv-go' : '')}
+              aria-pressed={settingsOpen}
+              title={settingsOpen ? '返回会话列表' : '外观 / 归档 / 存储 / 标签 / MCP / Skill / 模型路由'}
               onClick={() => setSettingsOpen(!settingsOpen)}
-            >⚙ 设置</button>
+            >{settingsOpen ? '← 返回会话' : '⚙ 设置'}</button>
           </div>
 
-          {/* v3.17.0：设置菜单的分组导航。每组下挂着原来那几个 sheet：
-              appearance = 面板外观；archive = 自动归档 + 工作区归档；
-              storage = 存储占用 + 标签管理；host = MCP / Skill / 模型路由。
-              切组只换「显示哪一组」，组内各 sheet 仍是原本的按钮展开/收起 ——
-              不预置默认打开项，避免一进设置就多打一次网络请求。 */}
+          {/* v3.17.0：设置是**独立整页**，不是就地展开的抽屉。点「⚙ 设置」后会话列表
+              整块让位，顶部换成一条分组导航（外观 / 归档 / 存储与标签 / 宿主集成），
+              每组只渲染自己那一页。再点「← 返回会话」回到列表。原维护栏那 9 个按钮
+              分布在这四页里，一页只显示属于它的工具，所以不存在「一屏九个按钮」。 */}
           {settingsOpen && (
-            <div className="dsm-settings-nav" role="tablist" aria-label="设置分组">
+            <section className="dsm-settings-page" aria-label="插件设置">
+              <div className="dsm-settings-nav" role="tablist" aria-label="设置导航">
               {DSM_SETTINGS_GROUPS.map((g) => (
                 <button
                   key={g.id}
@@ -3031,11 +3030,9 @@ function SessionPanel({ workspacesSvc }) {
                 >{g.label}</button>
               ))}
             </div>
-          )}
-          {/* v3.17.0：分组内的具体工具按钮。都是原先维护栏上那几个，只是按组归类
-              并只在对应分组展开 —— 顶部因此回到「一个设置按钮」的清爽状态。 */}
-          {settingsOpen && (
-            <div className="maint-bar dsm-settings-tools">
+              {/* v3.17.0：分组内的具体工具按钮。都是原先维护栏上那几个，只是按组归类
+                   并只在对应分组展开 —— 顶部因此回到「一个设置按钮」的清爽状态。 */}
+              <div className="maint-bar dsm-settings-tools">
               {settingsTab === 'appearance' && (
                 <div className="maint-group">
                   <button type="button" className="archv-btn" aria-expanded={qaStyleOpen} title="快捷面板的主题预设与圆角/模糊/不透明度/宽度" onClick={() => setQaStyleOpen(!qaStyleOpen)}>
@@ -3851,7 +3848,9 @@ function SessionPanel({ workspacesSvc }) {
               )}
             </div>
           )}
-          {showSessionList && (
+            </section>
+          )}
+          {!settingsOpen && showSessionList && (
             <>
               <div className="sess-tools sess-tools-5" aria-label="查找和整理会话">
                 <div className="sess-field">
@@ -3970,13 +3969,13 @@ function SessionPanel({ workspacesSvc }) {
             </>
           )}
 
-          {showSessionList && (topList.length > 0 || orphanSubagents.length > 0) && (
+          {!settingsOpen && showSessionList && (topList.length > 0 || orphanSubagents.length > 0) && (
             <div className={'sess-batch' + (selIds.length > 0 ? ' sess-batch-pin' : '')}>
               <span className="sess-btntext">{selIds.length ? `已选 ${selIds.length} 项` : (filter === 'archived' ? `共 ${archivedList.length} 个归档会话` : filter === 'starred' ? `共 ${starredList.length} 个收藏会话` : filter === 'review' ? `共 ${reviewList.length} 个待回看会话` : `共 ${totalTopCount} 个会话（活动 ${activeList.length} / 已归档 ${archivedList.length}）`)}</span>
               {/* issue #18 第 3 条：全选只覆盖当前列表里能单独勾选的行；折叠中的
                   子代理 / 分支成员与合成头不参与，避免「选中了看不见的东西」。 */}
               <button type="button" className="archv-btn" disabled={topList.length === 0} title={groupByLineage ? '选中当前列表的会话行（折叠中的子代理与分支成员不会被选中）' : undefined} onClick={selectAll}>全选</button>
-              {selIds.length > 0 && (
+              {!settingsOpen && selIds.length > 0 && (
                 <>
                   {filter === 'archived' && (
                     <button type="button" className="archv-btn" disabled={busy !== null} onClick={() => doBatch('restore-many')}>恢复所选</button>
@@ -4013,7 +4012,7 @@ function SessionPanel({ workspacesSvc }) {
                   <button type="button" className="archv-btn" onClick={clearSel}>取消选择</button>
                 </>
               )}
-              {selIds.length > 0 && batchMoveOpen && canMove.available && (
+              {!settingsOpen && selIds.length > 0 && batchMoveOpen && canMove.available && (
                 <div className="mv-sheet" role="region" aria-label="批量移动到工作区">
                   <div className="mv-sheet-head">
                     <h3 className="mv-sheet-title">批量移动 {selIds.length} 个会话</h3>
@@ -4067,7 +4066,7 @@ function SessionPanel({ workspacesSvc }) {
               {/* v0.1 批量标注 sheet：meta/set 是单请求原子批量（无部分失败形态），
                   失败整体提示——不需要 hkkz9522 式逐条结果对话框；批量备注有
                   覆盖风险，v0.1 不提供（逐会话编辑）。 */}
-              {selIds.length > 0 && batchMetaOpen && (
+              {!settingsOpen && selIds.length > 0 && batchMetaOpen && (
                 <div className="mv-sheet" role="region" aria-label="批量标注">
                   <div className="mv-sheet-head">
                     <h3 className="mv-sheet-title">批量标注 {selIds.length} 个会话</h3>
@@ -4104,7 +4103,7 @@ function SessionPanel({ workspacesSvc }) {
             </div>
           )}
 
-          {showSessionList && topList.length === 0 && orphanSubagents.length === 0 ? (
+          {!settingsOpen && showSessionList && topList.length === 0 && orphanSubagents.length === 0 ? (
             <div className="archv-empty">{query || workspaceFilter !== 'all' || tagFilter ? '没有匹配的会话。请调整搜索词、标签或工作区筛选。' : filter === 'archived' ? '目前没有归档会话。在“全部”里选中会话点“归档”即可收纳进来。' : filter === 'active' ? '目前没有活动会话。' : filter === 'starred' ? '还没有收藏的会话。点击会话左侧的星标即可收藏。' : filter === 'review' ? '还没有待回看的会话。打开会话行上的「待回看」开关即可收进来。' : filter === 'empty' ? '没有空白会话。新开会话还没产生内容时会归到这里，侧栏会自动隐藏它们。' : '暂无可管理的会话。'}</div>
           ) : showSessionList ? (
             <div className="archv-list" role="list">
@@ -4607,18 +4606,24 @@ const SIDEBAR_AUG_CSS = `
 .maint-bar{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:10px 14px;margin:0 0 8px}
 .maint-group{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0}
 .maint-right{display:flex;flex-direction:column;align-items:stretch;gap:8px;min-width:104px}
-/* v3.17.0：宿主集成组默认收起。展开后内部是纵向排列，别把父级 grid 撑宽。 */
-/* v3.17.0：面板内设置菜单。顶部只剩一个「⚙ 设置」按钮，
-   点开后先出一行分组 tab，再出该组的工具按钮与对应 sheet。 */
+/* v3.17.0：面板内设置。顶部只留一个「⚙ 设置」按钮；点开后是**独立整页**
+   （.dsm-settings-page），顶部一条分组导航，每页只渲染自己那组内容。
+   与参考实现（ofm 插件）同构：导航是 role=tablist，内容是整块切换，不是折叠。 */
 .maint-settings-btn{justify-self:start;white-space:nowrap}
 /* 顶部只剩一个按钮后，两列 grid 会把它拉满整行：改成不再分列。 */
 .maint-bar:has(> .maint-settings-btn){display:flex;align-items:center;justify-content:flex-start}
-.dsm-settings-nav{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px;padding:4px;border-radius:10px;background:var(--dsw-alias-fill-subtle)}
-.dsm-settings-tab{appearance:none;flex:1 1 auto;min-width:0;height:28px;padding:0 12px;border:none;border-radius:7px;background:transparent;color:var(--dsw-alias-label-secondary);font-family:inherit;font-size:12px;white-space:nowrap;cursor:pointer}
-.dsm-settings-tab:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
-.dsm-settings-tab-on{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);font-weight:600}
+.dsm-settings-page{display:flex;flex-direction:column;gap:12px;min-width:0;animation:dsm-page-in .18s ease-out}
+@keyframes dsm-page-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.dsm-settings-page{animation:none}}
+/* 导航条：独立成一行的 segmented 容器。 */
+.dsm-settings-nav{display:flex;flex-wrap:wrap;gap:2px;padding:3px;border-radius:10px;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-fill-subtle);min-width:0}
+.dsm-settings-tab{appearance:none;flex:1 1 auto;min-width:0;height:30px;padding:0 14px;border:none;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);font-family:inherit;font-size:12.5px;font-weight:500;white-space:nowrap;cursor:pointer;transition:background-color .15s ease,color .15s ease}
+.dsm-settings-tab:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}
+.dsm-settings-tab-on{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);font-weight:600;box-shadow:0 1px 3px rgb(0 0 0 / 12%)}
 .dsm-settings-tab:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:1px}
-.dsm-settings-tools{grid-template-columns:minmax(0,1fr);margin-bottom:8px}
+/* 每页的工具行：不再用维护栏的两列 grid，改成普通横向排布。 */
+.dsm-settings-tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0}
+.dsm-settings-tools .maint-group{flex-wrap:wrap}
 .maint-right .archv-btn{white-space:nowrap}
 @media (max-width:640px){.maint-bar{display:flex;flex-direction:column;align-items:stretch}.maint-right{flex-direction:row;flex-wrap:wrap;justify-content:flex-start}}
 .maint-note{font-size:11px;color:var(--dsw-alias-label-tertiary)}
