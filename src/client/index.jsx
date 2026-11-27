@@ -22,22 +22,28 @@ export const inject = ['slots']
 
 // v3.17.0：面板内设置菜单的分组。顺序 = 用户从「最常改」到「最少动」的直觉顺序；
 // 「宿主集成」放最后，因为那三项都改本机配置文件、且 MCP 改完还要重启。
+// v3.18.0：顶部统一导航只保留 5 格。已收藏 / 待回看 / 空白 移进「设置 → 会话筛选」，
+// 与用户「其他的请移动到【设置】下」的要求一致；回收站是高频操作，留在顶层。
 const DSM_SETTINGS_GROUPS = [
-  { id: 'appearance', label: '外观', icon: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zm0 3.2a5.8 5.8 0 1 1 0 11.6 5.8 5.8 0 0 1 0-11.6z' },
-  { id: 'archive', label: '归档', icon: 'M3 5h18v4H3zM5 9h14v11H5zm4 4h6v1.6H9z' },
-  { id: 'storage', label: '存储与标签', icon: 'M12 3l8 4.5v9L12 21l-8-4.5v-9zM12 5.2L6.4 8.4 12 11.6l5.6-3.2z' },
-  { id: 'host', label: '宿主集成', icon: 'M4 6h16v4H4zm0 8h16v4H4zm3-6v.01M7 14v.01' },
+  { id: 'appearance', label: '外观' },
+  { id: 'filters', label: '会话筛选' },
+  { id: 'archive', label: '归档' },
+  { id: 'storage', label: '存储与标签' },
+  { id: 'host', label: '宿主集成' },
 ]
+
 
 // v3.17.0：设置导航的滑块指示器。绝对定位 + transform 横向移动，切换时是滑动
 // 而不是整块闪一下；位置取自被选中 tab 的 offsetLeft/offsetWidth（导航会换行，
 // 所以纵向 top 也一并跟随，避免第二行时滑块停在第一行）。
-function SettingsNavGlider({ tab }) {
+// v3.18.0：顶部导航（全部/活动/已归档/设置/回收站）与设置内导航共用同一个滑块。
+// 两处的差别只有容器选择器与 data 属性名，所以做成参数。
+function DsmNavGlider({ active, rootSel = '.dsm-nav', attr = 'data-dsm-nav', cls = 'dsm-navglider' }) {
   const [box, setBox] = useState(null)
   useEffect(() => {
     const pick = () => {
-      const root = document.querySelector('.dsm-settings-nav')
-      const node = root && root.querySelector('[data-dsm-tab="' + tab + '"]')
+      const root = document.querySelector(rootSel)
+      const node = root && root.querySelector('[' + attr + '="' + active + '"]')
       if (!node) { setBox(null); return }
       setBox({ left: node.offsetLeft, width: node.offsetWidth, top: node.offsetTop })
     }
@@ -52,11 +58,11 @@ function SettingsNavGlider({ tab }) {
       window.removeEventListener('resize', pick)
       if (ro) { try { ro.disconnect() } catch (e) { /* 已断开 */ } }
     }
-  }, [tab])
+  }, [active, rootSel, attr])
   if (!box) return null
   return (
     <span
-      className="dsm-settings-glider"
+      className={cls}
       aria-hidden="true"
       style={{ transform: 'translateX(' + box.left + 'px)', width: box.width + 'px', top: box.top + 'px' }}
     />
@@ -90,27 +96,14 @@ body[data-ds-dark-theme] .archv{color-scheme:dark}
 .archv-stamp{font-size:11px;font-weight:500;color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-fill-secondary);border:1px solid var(--dsw-alias-border-l1);border-radius:999px;padding:2px 8px;white-space:nowrap;cursor:pointer;transition:color .15s ease,border-color .15s ease}
 .archv-stamp:hover{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-border-l3)}
 .archv-count{font-size:11px;font-weight:600;color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-fill-subtle);border:1px solid var(--dsw-alias-border-l2);border-radius:999px;padding:1px 8px;flex:none}
-.archv-sub{font-size:12px;line-height:1.55;color:var(--dsw-alias-label-tertiary);margin:0 0 12px;max-width:64ch}
 .archv-err{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 12px;border:1px solid color-mix(in srgb,var(--dsw-alias-state-error-primary) 40%,transparent);background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 8%,transparent);border-radius:var(--dsm-radius-sheet);color:var(--dsw-alias-state-error-primary);font-size:12px;margin-bottom:10px}
 .archv-errretry{appearance:none;border:1px solid color-mix(in srgb,var(--dsw-alias-state-error-primary) 45%,transparent);background:transparent;color:inherit;border-radius:8px;padding:4px 10px;font-size:11px;cursor:pointer;flex:none}
-.sess-fwrap{margin:0 0 12px}
-.sess-filter{display:flex;align-items:center;gap:6px}
 /* 低频分类（已收藏/空白/回收站）横向收纳：默认 max-width:0 隐藏，点按箭头
    （sess-fmore-open）或低频分类处于选中态（sess-fsec-on）时向右展开；
    max-width 过渡做横向滑出动画，overflow 裁剪回缩过程。 */
-.sess-fmore{display:inline-flex;align-items:center;gap:6px;max-width:0;opacity:0;overflow:hidden;white-space:nowrap;transform:translateX(-8px);visibility:hidden;transition:max-width .22s ease,opacity .18s ease,transform .22s ease,visibility 0s .22s}
-.sess-fwrap.sess-fmore-open .sess-fmore,.sess-fwrap.sess-fsec-on .sess-fmore{max-width:30em;opacity:1;transform:none;visibility:visible;transition:max-width .22s ease,opacity .18s ease,transform .22s ease}
-.sess-farrow{appearance:none;display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border:none;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;flex:none;padding:0;opacity:0;pointer-events:none;transition:opacity .18s ease,color .18s ease}
 /* 箭头默认紧跟三个主 tab 右边（悬停筛选行才浮现）；展开组撑开后把它推到
    行尾。无外圈底色，只渲染 svg 本体。隐藏态用 pointer-events:none 挡住
    误点；展开态（含选中低频分类的兜底）常驻——收起入口不能消失。 */
-.sess-fwrap:hover .sess-farrow,.sess-fwrap.sess-fmore-open .sess-farrow,.sess-fwrap.sess-fsec-on .sess-farrow{opacity:1;pointer-events:auto}
-.sess-farrow:hover{color:var(--dsw-alias-label-primary)}
-.sess-farrow svg{display:block;transition:transform .22s ease}
-.sess-fwrap.sess-fmore-open .sess-farrow svg,.sess-fwrap.sess-fsec-on .sess-farrow svg{transform:rotate(180deg)}
-.sess-fbtn{appearance:none;min-height:30px;padding:0 12px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-fill-subtle);color:var(--dsw-alias-label-secondary);border-radius:999px;font-size:12px;font-weight:500;cursor:pointer}
-.sess-fbtn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
-.sess-fbtn-on{background:var(--dsw-alias-interactive-bg-active);color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-border-l3)}
 .sess-tools{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin:0 0 8px}
 .sess-tools-4{grid-template-columns:repeat(auto-fit,minmax(132px,1fr))}
 /* T4 起搜索行有 5 个字段（搜索/工作区/标签/排序/分组）：固定 5 列 + minmax(0,1fr)
@@ -130,9 +123,6 @@ body[data-ds-dark-theme] .archv{color-scheme:dark}
 .dsm-kid-meta{font-size:11px;color:var(--dsw-alias-label-tertiary);flex:none;white-space:nowrap}
 .dsm-kid-acts{display:flex;align-items:center;gap:6px;flex:none;margin-left:auto}
 .dsm-kid-acts .archv-btn{min-height:26px;padding:0 9px;font-size:11px}
-.sess-field{display:flex;flex-direction:column;gap:5px;min-width:0}
-.sess-field label{font-size:11px;font-weight:600;color:var(--dsw-alias-label-secondary)}
-.sess-field input,.sess-field select{box-sizing:border-box;width:100%;min-height:36px;padding:0 10px;border:1px solid var(--dsw-alias-border-l2);border-radius:var(--dsm-radius-ctl);background:var(--dsw-alias-fill-elevated);color:var(--dsw-alias-label-primary);font:inherit;font-size:12px}
 .sess-results{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11px;color:var(--dsw-alias-label-tertiary);margin:0 0 4px}
 /* T4 后计数行右侧挂了「保存筛选」控件组，正文独占左侧可收缩。 */
 .sess-results-main{flex:1 1 auto;min-width:0}
@@ -310,7 +300,7 @@ body[data-ds-dark-theme] .archv{color-scheme:dark}
 /* 失败提示用警示色 + 加粗，并停留更久（需要用户读完去做下一步操作）。 */
 .archv-status-err{border-color:var(--dsw-alias-state-error-primary);color:var(--dsw-alias-state-error-primary);font-weight:500}
 @media (prefers-reduced-motion:reduce){.archv-skel-card::after{animation:none}.archv-card,.archv-btn,.archv-star{transition:none}.archv-star:hover,.archv-star:active{transform:none}.archv-status,.archv-spin{animation:none}}
-@media (max-width:640px){.archv-card{flex-direction:column;align-items:stretch;gap:10px}.archv-actions{justify-content:flex-end}.sess-tools,.sess-tools-4,.sess-tools-5{grid-template-columns:1fr}.sess-fbtn,.archv-btn{min-height:40px}.archv-star{width:30px;height:30px}.archv-star svg{width:22px;height:22px}.dsm-kids{margin-left:10px}.archv-titlerow{flex-wrap:wrap}.dsm-kid-row{flex-wrap:wrap}.dsm-kid-acts{margin-left:0}}
+@media (max-width:640px){.archv-card{flex-direction:column;align-items:stretch;gap:10px}.archv-actions{justify-content:flex-end}.sess-tools,.sess-tools-4,.sess-tools-5{grid-template-columns:1fr}.archv-btn{min-height:40px}.archv-star{width:30px;height:30px}.archv-star svg{width:22px;height:22px}.dsm-kids{margin-left:10px}.archv-titlerow{flex-wrap:wrap}.dsm-kid-row{flex-wrap:wrap}.dsm-kid-acts{margin-left:0}}
 .mv-sheet{width:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:12px;margin-top:12px;padding:14px;border:1px solid var(--dsw-alias-border-l2);border-radius:var(--dsm-radius-sheet);background:var(--dsw-alias-fill-subtle)}
 .mv-sheet-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
 .mv-sheet-title{font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary);margin:0}
@@ -1530,7 +1520,6 @@ function SessionPanel({ workspacesSvc }) {
   const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starred', 'review', 'empty', 'trash'].includes(initialPrefs.filter) ? initialPrefs.filter : 'all')
   // 低频分类折叠区：挂载时若选中的就是低频分类（偏好恢复/上次停留）则展开，
   // 保证激活 tab 始终可见；平时由箭头 hover/点按控制。
-  const [moreOpen, setMoreOpen] = useState(() => ['starred', 'review', 'empty', 'trash'].includes(initialPrefs.filter))
   const [query, setQuery] = useState('')
   const [workspaceFilter, setWorkspaceFilter] = useState(() => initialPrefs.workspaceFilter || 'all')
   const [sortBy, setSortBy] = useState(() => ['newest', 'oldest', 'title', 'priority'].includes(initialPrefs.sortBy) ? initialPrefs.sortBy : 'newest')
@@ -2990,9 +2979,6 @@ function SessionPanel({ workspacesSvc }) {
           : null}
         {sessions !== null && <span className="archv-count" title={groupByLineage ? '子代理会话折叠在父会话下，不计入此数' : undefined} aria-label={`${totalTopCount} 个会话`}>{totalTopCount}</span>}
       </div>
-      <p className="archv-sub">
-        统一管理全部会话：归档 / 恢复 / 移动到其他工作区 / 会话详情 / 批量操作，删除会先进入回收站，可在回收站内恢复或彻底清理。
-      </p>
       {error && (
         <div className="archv-err" role="alert">
           <span>{error}</span>
@@ -3014,37 +3000,47 @@ function SessionPanel({ workspacesSvc }) {
         </div>
       ) : (
         <>
-          {!settingsOpen && <div className={'sess-fwrap' + (moreOpen ? ' sess-fmore-open' : '') + (filter === 'starred' || filter === 'review' || filter === 'empty' || filter === 'trash' ? ' sess-fsec-on' : '')}>
-            <div className="sess-filter" role="tablist" aria-label="会话筛选">
-              <button type="button" role="tab" aria-selected={filter === 'all'} className={'sess-fbtn' + (filter === 'all' ? ' sess-fbtn-on' : '')} onClick={() => { setFilter('all'); clearSel(); setConfirmBatch(false) }}>全部 ({totalTopCount})</button>
-              <button type="button" role="tab" aria-selected={filter === 'active'} className={'sess-fbtn' + (filter === 'active' ? ' sess-fbtn-on' : '')} onClick={() => { setFilter('active'); clearSel(); setConfirmBatch(false) }}>活动 ({activeList.length})</button>
-              <button type="button" role="tab" aria-selected={filter === 'archived'} className={'sess-fbtn' + (filter === 'archived' ? ' sess-fbtn-on' : '')} onClick={() => { setFilter('archived'); clearSel(); setConfirmBatch(false) }}>已归档 ({archivedList.length})</button>
-              <span className="sess-fmore" role="tablist" aria-label="更多会话筛选">
-                <button type="button" role="tab" aria-selected={filter === 'starred'} className={'sess-fbtn' + (filter === 'starred' ? ' sess-fbtn-on' : '')} onClick={() => { setFilter('starred'); clearSel(); setConfirmBatch(false) }}>已收藏 ({starredList.length})</button>
-                <button type="button" role="tab" aria-selected={filter === 'review'} className={'sess-fbtn' + (filter === 'review' ? ' sess-fbtn-on' : '')} onClick={() => { setFilter('review'); clearSel(); setConfirmBatch(false) }}>待回看 ({reviewList.length})</button>
-                <button type="button" role="tab" aria-selected={filter === 'empty'} className={'sess-fbtn' + (filter === 'empty' ? ' sess-fbtn-on' : '')} onClick={() => { setFilter('empty'); clearSel(); setConfirmBatch(false) }}>空白 ({emptyList.length})</button>
-                <button type="button" role="tab" aria-selected={filter === 'trash'} className={'sess-fbtn' + (filter === 'trash' ? ' sess-fbtn-on' : '')} onClick={() => { setFilter('trash'); clearSel(); setConfirmBatch(false) }}>回收站 ({trash.length})</button>
-              </span>
-              <button type="button" className="sess-farrow" aria-expanded={moreOpen} aria-label={moreOpen ? '收起更多筛选' : '展开更多筛选'} title={moreOpen ? '收起更多筛选' : '展开更多筛选（已收藏 / 空白 / 回收站）'} onClick={() => setMoreOpen(!moreOpen)}>
-                <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M4 2l4 4-4 4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>
-              </button>
-            </div>
-          </div>}
+          {/* v3.18.0：顶部是**一条统一导航**（全部 / 活动 / 已归档 / 设置 / 回收站）。
+              原先筛选行与「⚙ 设置」是两个互不相干的容器，设置按钮还被拉满整行；
+              现在同一条圆角容器里并排，选中项只有胶囊底色 + 底部色条（无图标）。
+              已收藏 / 待回看 / 空白 从这条移进「设置 → 会话筛选」，不在顶栏占位。 */}
+          {(() => {
+            // v3.18.0：5 格导航的数据源。设置排第 4、回收站第 5（用户指定顺序）。
+            const navTabs = [
+              { id: 'all', label: '全部', count: totalTopCount },
+              { id: 'active', label: '活动', count: activeList.length },
+              { id: 'archived', label: '已归档', count: archivedList.length },
+              { id: '__settings', label: '设置', count: null },
+              { id: 'trash', label: '回收站', count: trash.length },
+            ]
+            const isOn = (id) => (id === '__settings' ? settingsOpen : !settingsOpen && filter === id)
+            return (
+              <div className="dsm-navwrap">
+                <div className="dsm-nav" role="tablist" aria-label="会话与设置">
+                  <DsmNavGlider active={settingsOpen ? '__settings' : filter} />
+                  {navTabs.map((tab) => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={isOn(tab.id)}
+                      data-dsm-nav={tab.id}
+                      className={'dsm-navtab' + (isOn(tab.id) ? ' dsm-navtab-on' : '')}
+                      onClick={() => {
+                        if (tab.id === '__settings') { setSettingsOpen(!settingsOpen); return }
+                        if (settingsOpen) setSettingsOpen(false)
+                        setFilter(tab.id); clearSel(); setConfirmBatch(false)
+                      }}
+                    >
+                      <span className="dsm-navtab-label">{tab.label}</span>
+                      {tab.count == null ? null : <span className="dsm-navtab-num">{tab.count}</span>}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )
+          })()}
 
-          {/* v3.17.0：维护栏收成一个「设置」入口。原先这里是 9 个常驻按钮
-              （存储占用 / 标签管理 / 自动归档 / 工作区归档 / 面板外观 + MCP / Skill /
-              模型路由），低频配置把会话面板顶部挤得很满。现在这些**全部**搬进面板
-              自己的设置菜单（`settingsOpen`），顶部只留这一个入口。
-              与管理会话直接相关的操作（筛选、批量选择）仍在原处，不受影响。 */}
-          <div className="maint-bar">
-            <button
-              type="button"
-              className={'archv-btn maint-settings-btn' + (settingsOpen ? ' archv-go' : '')}
-              aria-pressed={settingsOpen}
-              title={settingsOpen ? '返回会话列表' : '外观 / 归档 / 存储 / 标签 / MCP / Skill / 模型路由'}
-              onClick={() => setSettingsOpen(!settingsOpen)}
-            >{settingsOpen ? '← 返回会话' : '⚙ 设置'}</button>
-          </div>
 
           {/* v3.17.0：设置是**独立整页**，不是就地展开的抽屉。点「⚙ 设置」后会话列表
               整块让位，顶部换成一条分组导航（外观 / 归档 / 存储与标签 / 宿主集成），
@@ -3053,7 +3049,7 @@ function SessionPanel({ workspacesSvc }) {
           {settingsOpen && (
             <section className="dsm-settings-page" aria-label="插件设置">
               <div className="dsm-settings-nav" role="tablist" aria-label="设置导航">
-                <SettingsNavGlider tab={settingsTab} />
+                <DsmNavGlider active={settingsTab} rootSel=".dsm-settings-nav" attr="data-dsm-tab" cls="dsm-navglider" />
                 {DSM_SETTINGS_GROUPS.map((g) => (
                   <button
                     key={g.id}
@@ -3064,9 +3060,6 @@ function SessionPanel({ workspacesSvc }) {
                     data-dsm-tab={g.id}
                     onClick={() => setSettingsTab(g.id)}
                   >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <path d={g.icon} />
-                    </svg>
                     <span>{g.label}</span>
                   </button>
                 ))}
@@ -3079,6 +3072,24 @@ function SessionPanel({ workspacesSvc }) {
                   <button type="button" className="archv-btn" aria-expanded={qaStyleOpen} title="快捷面板的主题预设与圆角/模糊/不透明度/宽度" onClick={() => setQaStyleOpen(!qaStyleOpen)}>
                     面板外观
                   </button>
+                </div>
+              )}
+              {settingsTab === 'filters' && (
+                <div className="maint-group dsm-filter-links">
+                  {/* v3.18.0：这三个视图从顶部导航移到这里（用户要求「其他的移动到设置下」）。
+                      点一下＝关设置页 + 切到那个筛选，行为与原先在顶栏时一致。 */}
+                  {[
+                    { id: 'starred', label: '已收藏', count: starredList.length },
+                    { id: 'review', label: '待回看', count: reviewList.length },
+                    { id: 'empty', label: '空白', count: emptyList.length },
+                  ].map((f) => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      className="archv-btn"
+                      onClick={() => { setSettingsOpen(false); setFilter(f.id); clearSel(); setConfirmBatch(false) }}
+                    >{f.label} ({f.count})</button>
+                  ))}
                 </div>
               )}
               {settingsTab === 'archive' && (
@@ -4145,7 +4156,7 @@ function SessionPanel({ workspacesSvc }) {
 
           {!settingsOpen && showSessionList && topList.length === 0 && orphanSubagents.length === 0 ? (
             <div className="archv-empty">{query || workspaceFilter !== 'all' || tagFilter ? '没有匹配的会话。请调整搜索词、标签或工作区筛选。' : filter === 'archived' ? '目前没有归档会话。在“全部”里选中会话点“归档”即可收纳进来。' : filter === 'active' ? '目前没有活动会话。' : filter === 'starred' ? '还没有收藏的会话。点击会话左侧的星标即可收藏。' : filter === 'review' ? '还没有待回看的会话。打开会话行上的「待回看」开关即可收进来。' : filter === 'empty' ? '没有空白会话。新开会话还没产生内容时会归到这里，侧栏会自动隐藏它们。' : '暂无可管理的会话。'}</div>
-          ) : showSessionList ? (
+          ) : !settingsOpen && showSessionList ? (
             <div className="archv-list" role="list">
               {topList.map((it) => {
                 if (it && it.syntheticRoot) {
@@ -4639,6 +4650,33 @@ const SIDEBAR_AUG_CSS = `
 .dsm-storage-list{display:flex;flex-direction:column;gap:6px}
 .dsm-storage-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--dsw-alias-border-l2);border-radius:9px;background:var(--dsw-alias-fill-elevated)}
 .dsm-storage-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;color:var(--dsw-alias-label-primary)}
+/* v3.18.0：顶部统一导航（全部 / 活动 / 已归档 / 设置 / 回收站）。
+   参考样式：一条圆角容器，选中项 = 胶囊底色 + 底部色条，紧凑靠左、不撑满。 */
+.dsm-navwrap{margin:0 0 12px;min-width:0}
+.dsm-nav{position:relative;display:inline-flex;flex-wrap:wrap;align-items:center;gap:2px;
+  max-width:100%;padding:4px;border-radius:12px;
+  border:1px solid color-mix(in srgb,var(--dsw-alias-border-l2) 78%,transparent);
+  background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 62%,transparent);
+  box-shadow:inset 0 1px 2px rgb(0 0 0 / 4%)}
+.dsm-navglider{position:absolute;top:0;left:0;border-radius:9px;pointer-events:none;
+  background:linear-gradient(150deg,color-mix(in srgb,var(--dsw-alias-bg-layer-3) 92%,transparent),color-mix(in srgb,var(--dsw-alias-bg-layer-2) 88%,transparent));
+  box-shadow:0 2px 8px rgb(0 0 0 / 12%),inset 0 1px 0 rgb(255 255 255 / 8%);
+  transition:transform .3s cubic-bezier(.22,.61,.36,1),width .3s cubic-bezier(.22,.61,.36,1)}
+@media (prefers-reduced-motion:reduce){.dsm-navglider{transition:none}}
+.dsm-navtab{position:relative;z-index:1;appearance:none;display:inline-flex;align-items:baseline;gap:5px;
+  flex:none;padding:6px 13px;border:0;border-radius:9px;background:transparent;
+  color:var(--dsw-alias-label-secondary);font-family:inherit;font-size:12.5px;font-weight:600;
+  white-space:nowrap;cursor:pointer;transition:color .2s ease}
+.dsm-navtab:hover{color:var(--dsw-alias-label-primary)}
+.dsm-navtab-on{color:var(--dsw-alias-label-primary)}
+/* 底部色条：与参考实现同款，选中项的视觉主线。 */
+.dsm-navtab-on::after{content:'';position:absolute;left:13px;right:13px;bottom:2px;height:2px;border-radius:2px;
+  background:var(--dsw-alias-state-business-primary);opacity:.9}
+.dsm-navtab-num{font-variant-numeric:tabular-nums;font-weight:600;font-size:11px;
+  color:var(--dsw-alias-label-tertiary)}
+.dsm-navtab-on .dsm-navtab-num{color:var(--dsw-alias-label-secondary)}
+.dsm-navtab:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:1px}
+.dsm-filter-links{flex-wrap:wrap}
 .dsm-storage-bar{flex:0 0 96px;height:6px;border-radius:999px;background:var(--dsw-alias-fill-subtle);overflow:hidden}
 .dsm-storage-fill{display:block;height:100%;border-radius:999px;background:var(--dsw-alias-state-business-primary)}
 .dsm-storage-size{font-size:12px;color:var(--dsw-alias-label-secondary);flex:none;white-space:nowrap}
@@ -4649,9 +4687,6 @@ const SIDEBAR_AUG_CSS = `
 /* v3.17.0：面板内设置。顶部只留一个「⚙ 设置」按钮；点开后是**独立整页**
    （.dsm-settings-page），顶部一条分组导航，每页只渲染自己那组内容。
    与参考实现（ofm 插件）同构：导航是 role=tablist，内容是整块切换，不是折叠。 */
-.maint-settings-btn{justify-self:start;white-space:nowrap}
-/* 顶部只剩一个按钮后，两列 grid 会把它拉满整行：改成不再分列。 */
-.maint-bar:has(> .maint-settings-btn){display:flex;align-items:center;justify-content:flex-start}
 .dsm-settings-page{display:flex;flex-direction:column;gap:14px;min-width:0;animation:dsm-page-in .2s cubic-bezier(.16,1,.3,1)}
 @keyframes dsm-page-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){.dsm-settings-page{animation:none}}
