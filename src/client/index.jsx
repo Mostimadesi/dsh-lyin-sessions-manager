@@ -64,7 +64,6 @@ function DsmNavGlider({ active, rootSel = '.dsm-nav', attr = 'data-dsm-nav', cls
 
 // v3.18.3：设置页内部的分页顺序 = 用户从「最常改」到「最少动」的直觉顺序。
 const DSM_SETTINGS_TABS = [
-  { id: 'filters', label: '会话筛选' },
   { id: 'appearance', label: '外观' },
   { id: 'archive', label: '归档' },
   { id: 'storage', label: '存储与标签' },
@@ -1546,6 +1545,8 @@ function SessionPanel({ workspacesSvc }) {
   // 每次 filter 变化都要重排整棵卡片树）。先渲染一屏，滚到底再加一屏。
   const DSM_PAGE_SIZE = 60
   const [visibleCount, setVisibleCount] = useState(DSM_PAGE_SIZE)
+  // v3.19.0：顶栏「更多 ▾」下拉（回收站 / 待回看 / 空白）。
+  const [moreOpen, setMoreOpen] = useState(false)
 const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starred', 'review', 'empty', 'trash'].includes(initialPrefs.filter) ? initialPrefs.filter : 'all')
   // 低频分类折叠区：挂载时若选中的就是低频分类（偏好恢复/上次停留）则展开，
   // 保证激活 tab 始终可见；平时由箭头 hover/点按控制。
@@ -1695,7 +1696,7 @@ const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starre
   // qaStyleOpen / mcpOpen … 仍保留，因为要驱动各自的 sheet 内容。
   const [settingsOpen, setSettingsOpen] = useState(false)
   // v3.18.3：设置页内部的分页（外观 / 会话筛选 / 归档 / 存储与标签 / 宿主集成）。
-  const [settingsTab, setSettingsTab] = useState('filters')
+  const [settingsTab, setSettingsTab] = useState('appearance')
   const [routerOpen, setRouterOpen] = useState(false)
   const [routerTab, setRouterTab] = useState('llm')
   const [routerSnap, setRouterSnap] = useState(null)
@@ -2140,6 +2141,23 @@ const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starre
   }, [filter, workspaceFilter, sortBy, groupByLineage])
   // 换视图/搜索条件时回到第一屏，避免把上一个视图的展开量带过来。
   useEffect(() => { setVisibleCount(DSM_PAGE_SIZE) }, [filter, query, workspaceFilter, tagFilter, sortBy])
+
+  // v3.19.0：「更多 ▾」下拉的关闭时机（点外部 / Esc）。不关闭会让它盖住列表。
+  useEffect(() => {
+    if (!moreOpen) return
+    const onDown = (e) => {
+      const el = e.target
+      if (el instanceof Element && el.closest('.dsm-navwrap')) return
+      setMoreOpen(false)
+    }
+    const onKey = (e) => { if (e.key === 'Escape') setMoreOpen(false) }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [moreOpen])
 
   // v3.18.4：设置分区切换时自动展开该区的面板（用户要求内容直接平铺）。
   // 只在该分区首次进入时触发一次；各面板自己仍保留收起按钮。
@@ -3072,25 +3090,26 @@ const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starre
               现在同一条圆角容器里并排，选中项只有胶囊底色 + 底部色条（无图标）。
               已收藏 / 待回看 / 空白 从这条移进「设置 → 会话筛选」，不在顶栏占位。 */}
           {(() => {
-            // v3.18.0：5 格导航的数据源。设置排第 4、回收站第 5（用户指定顺序）。
+            // v3.19.0：顶栏 6 格。已收藏升级为独立一格；回收站 / 待回看 / 空白
+            // 收进「更多 ▾」——它们都是"看哪些会话"，不该藏在设置里。
             const navTabs = [
               { id: 'all', label: '全部', count: totalTopCount },
               { id: 'active', label: '活动', count: activeList.length },
               { id: 'archived', label: '已归档', count: archivedList.length },
+              { id: 'starred', label: '已收藏', count: starredAll.length },
               { id: '__settings', label: '设置', count: null },
+              { id: '__more', label: '更多', count: null },
+            ]
+            const MORE_VIEWS = [
+              { id: 'review', label: '待回看', count: reviewList.length },
+              { id: 'empty', label: '空白', count: emptyList.length },
               { id: 'trash', label: '回收站', count: trash.length },
             ]
-            // v3.18.4：已收藏 / 待回看 / 空白 是从「设置 → 会话筛选」进入的子视图，
-            // 顶栏没有它们的格子。原先 filter 取这三个值时不匹配任何 tab，五格全不亮，
-            // 看起来像「跳回全部却没选中任何东西」。这里把它们归到「全部」名下，
-            // 并在该 tab 上挂一个当前视图的小标记，避免误读。
-            const SUB_VIEWS = { starred: '已收藏', review: '待回看', empty: '空白' }
-            const activeTop = SUB_VIEWS[filter] ? 'all' : filter
-            const isOn = (id) => (id === '__settings' ? settingsOpen : !settingsOpen && activeTop === id)
+            const isOn = (id) => (id === '__settings' ? settingsOpen : (id === '__more' ? moreOpen : (!settingsOpen && !moreOpen && filter === id)))
             return (
               <div className="dsm-navwrap">
                 <div className="dsm-nav" role="tablist" aria-label="会话与设置">
-                  <DsmNavGlider active={settingsOpen ? '__settings' : activeTop} />
+                  <DsmNavGlider active={settingsOpen ? "__settings" : activeTop} />
                   {navTabs.map((tab) => (
                     <button
                       key={tab.id}
@@ -3098,18 +3117,37 @@ const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starre
                       role="tab"
                       aria-selected={isOn(tab.id)}
                       data-dsm-nav={tab.id}
-                      className={'dsm-navtab' + (isOn(tab.id) ? ' dsm-navtab-on' : '')}
+                      className={"dsm-navtab" + (isOn(tab.id) ? " dsm-navtab-on" : "")}
                       onClick={() => {
-                        if (tab.id === '__settings') { setSettingsOpen(!settingsOpen); return }
+                        if (tab.id === "__settings") { setSettingsOpen(!settingsOpen); return }
                         if (settingsOpen) setSettingsOpen(false)
+                        if (tab.id === "__more") { setMoreOpen(!moreOpen); return }
                         setFilter(tab.id); clearSel(); setConfirmBatch(false)
                       }}
                     >
                       <span className="dsm-navtab-label">{tab.label}</span>
                       {tab.count == null ? null : <span className="dsm-navtab-num">{tab.count}</span>}
+                      {tab.id === "__more" ? <span className="dsm-navtab-num">{moreOpen ? "▴" : "▾"}</span> : null}
                     </button>
                   ))}
                 </div>
+                {moreOpen && (
+                  <div className="dsm-more" role="menu" aria-label="更多视图">
+                    {MORE_VIEWS.map((v) => (
+                      <button
+                        key={v.id}
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={!settingsOpen && filter === v.id}
+                        className={"dsm-more-item" + (!settingsOpen && filter === v.id ? " dsm-more-on" : "")}
+                        onClick={() => { setMoreOpen(false); if (settingsOpen) setSettingsOpen(false); setFilter(v.id); clearSel(); setConfirmBatch(false) }}
+                      >
+                        <span>{v.label}</span>
+                        <span className="dsm-more-num">{v.count}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             )
           })()}
@@ -3142,26 +3180,6 @@ const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starre
                 </button>
               ))}
             </div>
-            {settingsTab === 'filters' && (
-            <div className="dsm-settings-section">
-                <div className="maint-group dsm-filter-links">
-                  {/* v3.18.0：这三个视图从顶部导航移到这里（用户要求「其他的移动到设置下」）。
-                      点一下＝关设置页 + 切到那个筛选，行为与原先在顶栏时一致。 */}
-                  {[
-                    { id: 'starred', label: '已收藏', count: starredList.length },
-                    { id: 'review', label: '待回看', count: reviewList.length },
-                    { id: 'empty', label: '空白', count: emptyList.length },
-                  ].map((f) => (
-                    <button
-                      key={f.id}
-                      type="button"
-                      className="archv-btn"
-                      onClick={() => { setSettingsOpen(false); setFilter(f.id); clearSel(); setConfirmBatch(false) }}
-                    >{f.label} ({f.count})</button>
-                  ))}
-                </div>
-            </div>
-            )}
 
             {settingsTab === 'appearance' && (
             <div className="dsm-settings-section">
@@ -3194,7 +3212,7 @@ const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starre
               localStorage，writeQaStyle 后 React 不知道要重渲染 → select 显示
               卡在旧值（外观其实已变）。改为受控组件：qaStyleTick state 随每
               次 write 递增，强制重读最新偏好。 */}
-          {settingsOpen && qaStyleOpen && (() => {
+          {settingsOpen && settingsTab === 'appearance' && qaStyleOpen && (() => {
             void qaStyleTick // 依赖标记：tick 变化时本 IIFE 重渲染重读 localStorage
             const qaPrefs = readQaStyle()
             const setPref = (patch) => { writeQaStyle(patch); setQaStyleTick((n) => n + 1) }
@@ -3270,7 +3288,7 @@ const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starre
 
           {/* v0.5.5 MCP 服务器开关 sheet：列出 profile 里的 MCP 行，一键启停。
               改动写 cordis.patch.yml（服务端先落 .bak-mcpui-* 备份），重启 DSH 生效。 */}
-          {settingsOpen && mcpOpen && (
+          {settingsOpen && settingsTab === 'host' && mcpOpen && (
             <div className="mv-sheet" aria-label="MCP 服务器">
               <div className="mv-sheet-head">
                 <h3 className="mv-sheet-title">MCP 服务器</h3>
@@ -3321,7 +3339,7 @@ const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starre
               并在响应里带回最新 snapshot，所以不用另外 refresh。
               文案要反复强调「不用重启」——这两行旁边的按钮（MCP / Skill）都需要
               重启或等下一个 step，混在一起很容易让人以为这里也要。 */}
-          {settingsOpen && routerOpen && (() => {
+          {settingsOpen && settingsTab === 'host' && routerOpen && (() => {
             const snap = routerSnap || {}
             const llm = snap.llm || {}
             const sub = snap.subagent || {}
@@ -3535,7 +3553,7 @@ const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starre
           {/* v0.6.1 skill 列表 sheet：三态开关写 frontmatter（服务端先落 .bak-skill-* 备份），
               宿主 watch 到文件变化后下一次 agent step 即生效，不需要重启。
               只列 skillRoots() 扫到的目录；包内（node_modules / bundled）标为只读。 */}
-          {settingsOpen && skillOpen && (
+          {settingsOpen && settingsTab === 'host' && skillOpen && (
             <div className="mv-sheet" aria-label="Skill 列表">
               <div className="mv-sheet-head">
                 <h3 className="mv-sheet-title">Skill 列表{skillData ? ` · ${skillData.skills.length}` : ''}</h3>
@@ -3704,7 +3722,7 @@ const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starre
           {/* T4 标签管理 sheet：照自动归档/待移动队列的 mv-sheet 先例。
               每行 = 名字 / 用量 / 重命名（内联输入）/ 并入 select + 确认 / 删除。
               删除确认文案含「只删标签，不会删除会话」红线（logic.tagDeleteConfirm）。 */}
-          {settingsOpen && openTagMgr && (
+          {settingsOpen && settingsTab === 'storage' && openTagMgr && (
             <div className="mv-sheet" aria-label="标签管理">
               <div className="mv-sheet-head">
                 <h3 className="mv-sheet-title">标签管理 · {tagDefs.length}</h3>
@@ -3802,7 +3820,7 @@ const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starre
               ))}
             </div>
           )}
-          {settingsOpen && aaOpen && (
+          {settingsOpen && settingsTab === 'archive' && aaOpen && (
             <div className="mv-sheet" aria-label="自动归档设置">
               <div className="mv-sheet-head">
                 <h3 className="mv-sheet-title">自动归档</h3>
@@ -3829,7 +3847,7 @@ const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starre
               </div>
             </div>
           )}
-          {settingsOpen && wsArchOpen && (
+          {settingsOpen && settingsTab === 'archive' && wsArchOpen && (
             <div className="mv-sheet" aria-label="工作区归档">
               <div className="mv-sheet-head">
                 <h3 className="mv-sheet-title">工作区归档</h3>
@@ -3866,7 +3884,7 @@ const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starre
               </div>
             </div>
           )}
-          {settingsOpen && storageOpen && (
+          {settingsOpen && settingsTab === 'storage' && storageOpen && (
             <div className="mv-sheet" aria-label="存储占用">
               <div className="mv-sheet-head">
                 <h3 className="mv-sheet-title">存储占用</h3>
@@ -4684,7 +4702,7 @@ const SIDEBAR_AUG_CSS = `
    外层是一张毛玻璃卡片（blur + saturate + 大阴影 + 内高光），内层才是分段容器。
    只做内层的话，在宿主的半透明面板上就只剩一圈细边框，显得平、和别处不搭。 */
 /* 不用 sticky：本面板不一定是最外层滚动容器，吸顶会盖住标题且无可预期收益。 */
-.dsm-navwrap{margin:0 0 12px;padding:8px;
+.dsm-navwrap{position:relative;margin:0 0 12px;padding:8px;
   border-radius:16px;
   border:1px solid color-mix(in srgb,var(--dsw-alias-border-l2) 82%,transparent);
   background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 62%,transparent);
@@ -4721,6 +4739,21 @@ const SIDEBAR_AUG_CSS = `
   border:1px solid color-mix(in srgb,var(--dsw-alias-border-l1) 78%,transparent);
   background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 42%,transparent)}
 /* v3.18.3：设置页内部的小导航（独立于顶部导航），与顶部同款式。 */
+/* v3.19.0：顶栏「更多 ▾」下拉（待回看 / 空白 / 回收站）。
+   用绝对定位挂在导航右端下方，点外部关闭由 document 监听负责。 */
+.dsm-more{position:absolute;top:calc(100% + 6px);right:0;z-index:40;min-width:168px;
+  display:flex;flex-direction:column;gap:2px;padding:5px;border-radius:12px;
+  border:1px solid color-mix(in srgb,var(--dsw-alias-border-l2) 85%,transparent);
+  background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 94%,transparent);
+  backdrop-filter:blur(18px) saturate(160%);
+  box-shadow:0 10px 30px rgb(0 0 0 / 22%),inset 0 1px 0 rgb(255 255 255 / 7%)}
+.dsm-more-item{appearance:none;display:flex;align-items:center;justify-content:space-between;gap:14px;
+  padding:7px 10px;border:0;border-radius:8px;background:transparent;
+  color:var(--dsw-alias-label-secondary);font-family:inherit;font-size:12.5px;
+  text-align:left;cursor:pointer;white-space:nowrap}
+.dsm-more-item:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
+.dsm-more-on{color:var(--dsw-alias-label-primary);font-weight:600}
+.dsm-more-num{font-variant-numeric:tabular-nums;font-size:11px;color:var(--dsw-alias-label-tertiary)}
 .dsm-subnav{margin:0 0 4px}
 /* v3.18.4：分区内不再有「点击展开」按钮，面板直接铺开；占位块只负责留白。 */
 .dsm-panel-open{display:none}
