@@ -24,13 +24,6 @@ export const inject = ['slots']
 // 「宿主集成」放最后，因为那三项都改本机配置文件、且 MCP 改完还要重启。
 // v3.18.0：顶部统一导航只保留 5 格。已收藏 / 待回看 / 空白 移进「设置 → 会话筛选」，
 // 与用户「其他的请移动到【设置】下」的要求一致；回收站是高频操作，留在顶层。
-const DSM_SETTINGS_GROUPS = [
-  { id: 'appearance', label: '外观' },
-  { id: 'filters', label: '会话筛选' },
-  { id: 'archive', label: '归档' },
-  { id: 'storage', label: '存储与标签' },
-  { id: 'host', label: '宿主集成' },
-]
 
 
 // v3.17.0：设置导航的滑块指示器。绝对定位 + transform 横向移动，切换时是滑动
@@ -104,7 +97,30 @@ body[data-ds-dark-theme] .archv{color-scheme:dark}
 /* 箭头默认紧跟三个主 tab 右边（悬停筛选行才浮现）；展开组撑开后把它推到
    行尾。无外圈底色，只渲染 svg 本体。隐藏态用 pointer-events:none 挡住
    误点；展开态（含选中低频分类的兜底）常驻——收起入口不能消失。 */
-.sess-tools{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin:0 0 8px}
+/* v3.18.2：搜索/筛选行此前**没有任何 CSS**（.sess-field 全无规则），靠浏览器默认样式
+   渲染，所以标签与控件挤在一起、和上面的导航不像一套东西。这里补齐：
+   每个字段一列、标签小字弱化、控件统一 32px 高 + 圆角 + 一层淡底。 */
+.sess-tools{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin:0 0 10px}
+.sess-field{display:flex;flex-direction:column;gap:4px;min-width:0}
+.sess-field>label{font-size:11px;font-weight:600;letter-spacing:.02em;
+  color:var(--dsw-alias-label-tertiary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sess-field>input,.sess-field>select{appearance:none;-webkit-appearance:none;
+  box-sizing:border-box;width:100%;min-width:0;height:32px;padding:0 10px;
+  border:1px solid color-mix(in srgb,var(--dsw-alias-border-l2) 88%,transparent);
+  border-radius:8px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 78%,transparent);
+  color:var(--dsw-alias-label-primary);font-family:inherit;font-size:12.5px;line-height:30px;
+  transition:border-color .15s ease,background-color .15s ease}
+.sess-field>input::placeholder{color:var(--dsw-alias-label-tertiary)}
+.sess-field>input:hover,.sess-field>select:hover{border-color:var(--dsw-alias-border-l3)}
+.sess-field>input:focus-visible,.sess-field>select:focus-visible{
+  outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:1px;
+  border-color:color-mix(in srgb,var(--dsw-alias-state-business-primary) 55%,transparent)}
+.sess-field>select{padding-right:26px;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23888' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 9px center}
+.sess-field>select:disabled,.sess-field>input:disabled{opacity:.55;cursor:default}
+/* 搜索框在没有额外（保存筛选）按钮时独占一行也不必拉太长，交给 grid 即可。 */
+.sess-tools .archv-btn{align-self:flex-end}
 .sess-tools-4{grid-template-columns:repeat(auto-fit,minmax(132px,1fr))}
 /* T4 起搜索行有 5 个字段（搜索/工作区/标签/排序/分组）：固定 5 列 + minmax(0,1fr)
    一行排满——auto-fit(minmax(124px,…)) 在面板宽度不足 5×124+gap 时会把最后
@@ -1665,7 +1681,6 @@ function SessionPanel({ workspacesSvc }) {
   // null = 菜单关闭。用它替代原先 9 个独立的 open 状态做互斥；下面那些
   // qaStyleOpen / mcpOpen … 仍保留，因为要驱动各自的 sheet 内容。
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [settingsTab, setSettingsTab] = useState('appearance')
   const [routerOpen, setRouterOpen] = useState(false)
   const [routerTab, setRouterTab] = useState('llm')
   const [routerSnap, setRouterSnap] = useState(null)
@@ -3048,33 +3063,10 @@ function SessionPanel({ workspacesSvc }) {
               分布在这四页里，一页只显示属于它的工具，所以不存在「一屏九个按钮」。 */}
           {settingsOpen && (
             <section className="dsm-settings-page" aria-label="插件设置">
-              <div className="dsm-settings-nav" role="tablist" aria-label="设置导航">
-                <DsmNavGlider active={settingsTab} rootSel=".dsm-settings-nav" attr="data-dsm-tab" cls="dsm-navglider" />
-                {DSM_SETTINGS_GROUPS.map((g) => (
-                  <button
-                    key={g.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={settingsTab === g.id}
-                    className={'dsm-settings-tab' + (settingsTab === g.id ? ' dsm-settings-tab-on' : '')}
-                    data-dsm-tab={g.id}
-                    onClick={() => setSettingsTab(g.id)}
-                  >
-                    <span>{g.label}</span>
-                  </button>
-                ))}
-              </div>
-              {/* v3.17.0：分组内的具体工具按钮。都是原先维护栏上那几个，只是按组归类
-                   并只在对应分组展开 —— 顶部因此回到「一个设置按钮」的清爽状态。 */}
-              <div className="maint-bar dsm-settings-tools">
-              {settingsTab === 'appearance' && (
-                <div className="maint-group">
-                  <button type="button" className="archv-btn" aria-expanded={qaStyleOpen} title="快捷面板的主题预设与圆角/模糊/不透明度/宽度" onClick={() => setQaStyleOpen(!qaStyleOpen)}>
-                    面板外观
-                  </button>
-                </div>
-              )}
-              {settingsTab === 'filters' && (
+            {/* v3.18.2：设置页只保留一级导航。原来这里还有第二层分组导航，点开设置
+                要过两层才够到内容——多余。现在各分区平铺，标题即分区名。 */}
+            <div className="dsm-settings-section">
+              <h3 className="dsm-settings-h">会话筛选</h3>
                 <div className="maint-group dsm-filter-links">
                   {/* v3.18.0：这三个视图从顶部导航移到这里（用户要求「其他的移动到设置下」）。
                       点一下＝关设置页 + 切到那个筛选，行为与原先在顶栏时一致。 */}
@@ -3091,8 +3083,19 @@ function SessionPanel({ workspacesSvc }) {
                     >{f.label} ({f.count})</button>
                   ))}
                 </div>
-              )}
-              {settingsTab === 'archive' && (
+            </div>
+
+            <div className="dsm-settings-section">
+              <h3 className="dsm-settings-h">外观</h3>
+                <div className="maint-group">
+                  <button type="button" className="archv-btn" aria-expanded={qaStyleOpen} title="快捷面板的主题预设与圆角/模糊/不透明度/宽度" onClick={() => setQaStyleOpen(!qaStyleOpen)}>
+                    面板外观
+                  </button>
+                </div>
+            </div>
+
+            <div className="dsm-settings-section">
+              <h3 className="dsm-settings-h">归档</h3>
                 <div className="maint-group">
                   <button type="button" className={'archv-btn' + (aa.settings.inactiveDays ? ' archv-go' : '')} aria-expanded={aaOpen} onClick={() => setAaOpen(!aaOpen)}>
                     自动归档{aa.settings.inactiveDays ? `：${aa.settings.inactiveDays} 天未活跃` : '：未启用'}
@@ -3112,8 +3115,10 @@ function SessionPanel({ workspacesSvc }) {
                     工作区归档{wsArch.keys.length ? `：${wsArch.keys.length} 个` : '：无'}
                   </button>
                 </div>
-              )}
-              {settingsTab === 'storage' && (
+            </div>
+
+            <div className="dsm-settings-section">
+              <h3 className="dsm-settings-h">存储与标签</h3>
                 <div className="maint-group">
                   <button type="button" className="archv-btn" aria-expanded={storageOpen} onClick={() => { const next = !storageOpen; setStorageOpen(next); if (next && (!storage || storageDirty.current) && !storageBusy) loadStorage() }}>
                     存储占用{storage ? ` · ${fmtBytes(storage.totalBytes) || '0 B'}` : ''}
@@ -3127,8 +3132,10 @@ function SessionPanel({ workspacesSvc }) {
                     onClick={() => { setOpenTagMgr(!openTagMgr); setRenamingTagId(null) }}
                   >标签管理{tagsReady && tagDefs.length ? ` (${tagDefs.length})` : ''}</button>
                 </div>
-              )}
-              {settingsTab === 'host' && (
+            </div>
+
+            <div className="dsm-settings-section">
+              <h3 className="dsm-settings-h">宿主集成</h3>
                 <div className="maint-group">
                   <button type="button" className="archv-btn" aria-expanded={mcpOpen} title="启用 / 停用本机 profile 里的 MCP 服务器（重启 DSH 后生效）" onClick={() => {
                     const next = !mcpOpen
@@ -3166,8 +3173,8 @@ function SessionPanel({ workspacesSvc }) {
                       .finally(() => setRouterBusy(false))
                   }}>模型路由{routerSnap && Array.isArray(routerSnap.llm && routerSnap.llm.routes) ? ` (${routerSnap.llm.routes.length})` : ''}</button>
                 </div>
-              )}
             </div>
+
 
           {/* v0.2.2 快捷面板外观 sheet：预设下拉 + 四个滑杆，改动即时生效并
               持久化（localStorage['dsm-qa-style-v1']）；「恢复默认」清空细参数
@@ -3175,7 +3182,7 @@ function SessionPanel({ workspacesSvc }) {
               localStorage，writeQaStyle 后 React 不知道要重渲染 → select 显示
               卡在旧值（外观其实已变）。改为受控组件：qaStyleTick state 随每
               次 write 递增，强制重读最新偏好。 */}
-          {settingsOpen && settingsTab === 'appearance' && qaStyleOpen && (() => {
+          {settingsOpen && qaStyleOpen && (() => {
             void qaStyleTick // 依赖标记：tick 变化时本 IIFE 重渲染重读 localStorage
             const qaPrefs = readQaStyle()
             const setPref = (patch) => { writeQaStyle(patch); setQaStyleTick((n) => n + 1) }
@@ -3251,7 +3258,7 @@ function SessionPanel({ workspacesSvc }) {
 
           {/* v0.5.5 MCP 服务器开关 sheet：列出 profile 里的 MCP 行，一键启停。
               改动写 cordis.patch.yml（服务端先落 .bak-mcpui-* 备份），重启 DSH 生效。 */}
-          {settingsOpen && settingsTab === 'host' && mcpOpen && (
+          {settingsOpen && mcpOpen && (
             <div className="mv-sheet" aria-label="MCP 服务器">
               <div className="mv-sheet-head">
                 <h3 className="mv-sheet-title">MCP 服务器</h3>
@@ -3302,7 +3309,7 @@ function SessionPanel({ workspacesSvc }) {
               并在响应里带回最新 snapshot，所以不用另外 refresh。
               文案要反复强调「不用重启」——这两行旁边的按钮（MCP / Skill）都需要
               重启或等下一个 step，混在一起很容易让人以为这里也要。 */}
-          {settingsOpen && settingsTab === 'host' && routerOpen && (() => {
+          {settingsOpen && routerOpen && (() => {
             const snap = routerSnap || {}
             const llm = snap.llm || {}
             const sub = snap.subagent || {}
@@ -3516,7 +3523,7 @@ function SessionPanel({ workspacesSvc }) {
           {/* v0.6.1 skill 列表 sheet：三态开关写 frontmatter（服务端先落 .bak-skill-* 备份），
               宿主 watch 到文件变化后下一次 agent step 即生效，不需要重启。
               只列 skillRoots() 扫到的目录；包内（node_modules / bundled）标为只读。 */}
-          {settingsOpen && settingsTab === 'host' && skillOpen && (
+          {settingsOpen && skillOpen && (
             <div className="mv-sheet" aria-label="Skill 列表">
               <div className="mv-sheet-head">
                 <h3 className="mv-sheet-title">Skill 列表{skillData ? ` · ${skillData.skills.length}` : ''}</h3>
@@ -3685,7 +3692,7 @@ function SessionPanel({ workspacesSvc }) {
           {/* T4 标签管理 sheet：照自动归档/待移动队列的 mv-sheet 先例。
               每行 = 名字 / 用量 / 重命名（内联输入）/ 并入 select + 确认 / 删除。
               删除确认文案含「只删标签，不会删除会话」红线（logic.tagDeleteConfirm）。 */}
-          {settingsOpen && settingsTab === 'storage' && openTagMgr && (
+          {settingsOpen && openTagMgr && (
             <div className="mv-sheet" aria-label="标签管理">
               <div className="mv-sheet-head">
                 <h3 className="mv-sheet-title">标签管理 · {tagDefs.length}</h3>
@@ -3783,7 +3790,7 @@ function SessionPanel({ workspacesSvc }) {
               ))}
             </div>
           )}
-          {settingsOpen && settingsTab === 'archive' && aaOpen && (
+          {settingsOpen && aaOpen && (
             <div className="mv-sheet" aria-label="自动归档设置">
               <div className="mv-sheet-head">
                 <h3 className="mv-sheet-title">自动归档</h3>
@@ -3810,7 +3817,7 @@ function SessionPanel({ workspacesSvc }) {
               </div>
             </div>
           )}
-          {settingsOpen && settingsTab === 'archive' && wsArchOpen && (
+          {settingsOpen && wsArchOpen && (
             <div className="mv-sheet" aria-label="工作区归档">
               <div className="mv-sheet-head">
                 <h3 className="mv-sheet-title">工作区归档</h3>
@@ -3847,7 +3854,7 @@ function SessionPanel({ workspacesSvc }) {
               </div>
             </div>
           )}
-          {settingsOpen && settingsTab === 'storage' && storageOpen && (
+          {settingsOpen && storageOpen && (
             <div className="mv-sheet" aria-label="存储占用">
               <div className="mv-sheet-head">
                 <h3 className="mv-sheet-title">存储占用</h3>
@@ -4687,6 +4694,13 @@ const SIDEBAR_AUG_CSS = `
   color:var(--dsw-alias-label-tertiary)}
 .dsm-navtab-on .dsm-navtab-num{color:var(--dsw-alias-label-secondary)}
 .dsm-navtab:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:1px}
+/* v3.18.2：设置页现在是「平铺分区」而不是两层导航，每区一个标题。 */
+.dsm-settings-section{display:flex;flex-direction:column;gap:8px;min-width:0;
+  padding:12px;border-radius:12px;
+  border:1px solid color-mix(in srgb,var(--dsw-alias-border-l1) 78%,transparent);
+  background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 42%,transparent)}
+.dsm-settings-h{margin:0;font-size:12px;font-weight:700;letter-spacing:.02em;
+  color:var(--dsw-alias-label-secondary)}
 .dsm-filter-links{flex-wrap:wrap}
 .dsm-storage-bar{flex:0 0 96px;height:6px;border-radius:999px;background:var(--dsw-alias-fill-subtle);overflow:hidden}
 .dsm-storage-fill{display:block;height:100%;border-radius:999px;background:var(--dsw-alias-state-business-primary)}
@@ -4703,24 +4717,7 @@ const SIDEBAR_AUG_CSS = `
 @media (prefers-reduced-motion:reduce){.dsm-settings-page{animation:none}}
 /* 导航条：分段控件 + 滑块指示器（与 ofm 插件的设置页同一套做法）。
    滑块用绝对定位 + transform 移动，切换时是横向滑动而不是闪一下。 */
-/* 设置页内的分组导航：与顶部共用同一套分段容器语言（见 .dsm-nav 上方注释）。 */
-.dsm-settings-nav{position:relative;display:flex;flex-wrap:wrap;gap:2px;padding:3px;border-radius:13px;
-  width:fit-content;max-width:100%;min-width:0;
-  border:1px solid color-mix(in srgb,var(--dsw-alias-border-l1) 80%,transparent);
-  background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 62%,transparent);
-  box-shadow:inset 0 1px 2px rgb(0 0 0 / 4%)}
-.dsm-settings-tab{position:relative;z-index:1;appearance:none;flex:none;
-  display:inline-flex;align-items:baseline;gap:6px;
-  padding:6px 13px;border:none;border-radius:10px;background:transparent;
-  color:var(--dsw-alias-label-secondary);font-family:inherit;font-size:12px;font-weight:600;
-  white-space:nowrap;cursor:pointer;transition:color .2s ease}
-.dsm-settings-tab:hover{color:var(--dsw-alias-label-primary)}
-.dsm-settings-tab-on{color:var(--dsw-alias-label-primary)}
-/* 与顶部导航一致：选中项底部色条。 */
-.dsm-settings-tab-on::after{content:'';position:absolute;left:13px;right:13px;bottom:2px;height:2px;border-radius:2px;
-  background:var(--dsw-alias-state-business-primary);opacity:.85}
-.dsm-settings-tab:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:1px}
-/* 每页的工具行：不再用维护栏的两列 grid，改成可换行的横向排布。 */
+
 .dsm-settings-tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0;padding:10px 12px;
   border-radius:11px;border:1px solid color-mix(in srgb,var(--dsw-alias-border-l1) 85%,transparent);
   background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 55%,transparent)}
