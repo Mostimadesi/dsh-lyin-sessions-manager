@@ -3183,25 +3183,29 @@ const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starre
 
             {settingsTab === 'appearance' && (
             <div className="dsm-settings-section">
-                <div className="dsm-panel-open" />
+                <button type="button" className="archv-btn" aria-expanded={qaStyleOpen} onClick={() => setQaStyleOpen(!qaStyleOpen)}>面板外观</button>
             </div>
             )}
 
             {settingsTab === 'archive' && (
             <div className="dsm-settings-section">
-                <div className="dsm-panel-open" />
+                <button type="button" className="archv-btn" aria-expanded={aaOpen} onClick={() => setAaOpen(!aaOpen)}>自动归档</button>
+                <button type="button" className="archv-btn" aria-expanded={wsArchOpen} onClick={() => { const next = !wsArchOpen; setWsArchOpen(next); if (next) loadWsArch() }}>工作区归档</button>
             </div>
             )}
 
             {settingsTab === 'storage' && (
             <div className="dsm-settings-section">
-                <div className="dsm-panel-open" />
+                <button type="button" className="archv-btn" aria-expanded={storageOpen} onClick={() => { const next = !storageOpen; setStorageOpen(next); if (next && (!storage || storageDirty.current) && !storageBusy) loadStorage() }}>存储占用</button>
+                <button type="button" className="archv-btn" aria-expanded={openTagMgr} onClick={() => { setOpenTagMgr(!openTagMgr); setRenamingTagId(null) }}>标签管理</button>
             </div>
             )}
 
             {settingsTab === 'host' && (
             <div className="dsm-settings-section">
-                <div className="dsm-panel-open" />
+                <button type="button" className="archv-btn" aria-expanded={mcpOpen} onClick={() => { const n = !mcpOpen; setMcpOpen(n); if (!n) return; setMcpBusy(true); getJSON("/archived-sessions/mcp/rows").then((d) => setMcpRows(Array.isArray(d.rows) ? d.rows : [])).catch((e) => setMcpErr(String((e && e.message) || e))).finally(() => setMcpBusy(false)) }}>MCP 服务器</button>
+                <button type="button" className="archv-btn" aria-expanded={skillOpen} onClick={() => { const n = !skillOpen; setSkillOpen(n); if (!n) return; setSkillBusy(true); getJSON("/archived-sessions/skills/list").then((d) => { setSkillData(d); const w = (d.roots || []).filter((r) => r.scope !== "bundled"); setSkillImportRoot((prev) => prev || (w[0] && w[0].path) || "") }).catch((e) => setSkillErr(String((e && e.message) || e))).finally(() => setSkillBusy(false)) }}>Skill 列表</button>
+                <button type="button" className="archv-btn" aria-expanded={routerOpen} onClick={() => { const n = !routerOpen; setRouterOpen(n); if (!n) return; setRouterBusy(true); postJSON("/archived-sessions/router/snapshot", {}).then((d) => setRouterSnap(d)).catch((e) => setRouterErr(String((e && e.message) || e))).finally(() => setRouterBusy(false)) }}>模型路由</button>
             </div>
             )}
 
