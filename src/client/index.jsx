@@ -63,12 +63,6 @@ function DsmNavGlider({ active, rootSel = '.dsm-nav', attr = 'data-dsm-nav', cls
 }
 
 // v3.18.3：设置页内部的分页顺序 = 用户从「最常改」到「最少动」的直觉顺序。
-const DSM_SETTINGS_TABS = [
-  { id: 'appearance', label: '外观' },
-  { id: 'archive', label: '归档' },
-  { id: 'storage', label: '存储与标签' },
-  { id: 'host', label: '宿主集成' },
-]
 
 const PANEL_PREFS_KEY = 'dsm-panel-prefs-v1'
 function loadPanelPrefs() {
@@ -1696,7 +1690,6 @@ const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starre
   // qaStyleOpen / mcpOpen … 仍保留，因为要驱动各自的 sheet 内容。
   const [settingsOpen, setSettingsOpen] = useState(false)
   // v3.18.3：设置页内部的分页（外观 / 会话筛选 / 归档 / 存储与标签 / 宿主集成）。
-  const [settingsTab, setSettingsTab] = useState('appearance')
   const [routerOpen, setRouterOpen] = useState(false)
   const [routerTab, setRouterTab] = useState('llm')
   const [routerSnap, setRouterSnap] = useState(null)
@@ -2159,40 +2152,39 @@ const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starre
     }
   }, [moreOpen])
 
-  // v3.18.4：设置分区切换时自动展开该区的面板（用户要求内容直接平铺）。
-  // 只在该分区首次进入时触发一次；各面板自己仍保留收起按钮。
-  const autoOpenedRef = useRef(new Set())
+  // v3.20.0：设置页平铺显示，没有分区切换；进入设置就把四区面板全部展开一次。
+  // 用户明确要求「内容已经自动展开了，按钮多余」，所以不再有手动开合入口。
+  const autoOpenedRef = useRef(false)
   useEffect(() => {
-    if (!settingsOpen) return
-    const key = settingsTab
-    if (autoOpenedRef.current.has(key)) return
-    autoOpenedRef.current.add(key)
-    if (key === 'appearance') setQaStyleOpen(true)
-    if (key === 'archive') { setAaOpen(true); loadWsArch() ; setWsArchOpen(true) }
-    if (key === 'storage') { loadStorage(); setStorageOpen(true) }
-    if (key === 'host') {
-      setMcpOpen(true); setMcpBusy(true); setMcpErr(''); setMcpNote('')
-      getJSON('/archived-sessions/mcp/rows')
-        .then((d) => setMcpRows(Array.isArray(d.rows) ? d.rows : []))
-        .catch((e) => setMcpErr(String((e && e.message) || e)))
-        .finally(() => setMcpBusy(false))
-      setSkillOpen(true); setSkillBusy(true); setSkillErr(''); setSkillNote('')
-      getJSON('/archived-sessions/skills/list')
-        .then((d) => {
-          setSkillData(d)
-          const writable = (d.roots || []).filter((r) => r.scope !== 'bundled')
-          setSkillImportRoot((prev) => prev || (writable[0] && writable[0].path) || '')
-        })
-        .catch((e) => setSkillErr(String((e && e.message) || e)))
-        .finally(() => setSkillBusy(false))
-      setRouterOpen(true); setRouterBusy(true); setRouterErr(''); setRouterNote(''); setRouterEdit('')
-      setRouterNew({ open: false, id: '', name: '', chain: '' })
-      postJSON('/archived-sessions/router/snapshot', {})
-        .then((d) => setRouterSnap(d))
-        .catch((e) => setRouterErr(String((e && e.message) || e)))
-        .finally(() => setRouterBusy(false))
-    }
-  }, [settingsOpen, settingsTab])
+    if (!settingsOpen || autoOpenedRef.current) return
+    autoOpenedRef.current = true
+    setQaStyleOpen(true)
+    setAaOpen(true)
+    loadWsArch()
+    setWsArchOpen(true)
+    loadStorage()
+    setStorageOpen(true)
+    setMcpOpen(true); setMcpBusy(true); setMcpErr(''); setMcpNote('')
+    getJSON('/archived-sessions/mcp/rows')
+      .then((d) => setMcpRows(Array.isArray(d.rows) ? d.rows : []))
+      .catch((e) => setMcpErr(String((e && e.message) || e)))
+      .finally(() => setMcpBusy(false))
+    setSkillOpen(true); setSkillBusy(true); setSkillErr(''); setSkillNote('')
+    getJSON('/archived-sessions/skills/list')
+      .then((d) => {
+        setSkillData(d)
+        const w = (d.roots || []).filter((r) => r.scope !== 'bundled')
+        setSkillImportRoot((prev) => prev || (w[0] && w[0].path) || '')
+      })
+      .catch((e) => setSkillErr(String((e && e.message) || e)))
+      .finally(() => setSkillBusy(false))
+    setRouterOpen(true); setRouterBusy(true); setRouterErr(''); setRouterNote(''); setRouterEdit('')
+    setRouterNew({ open: false, id: '', name: '', chain: '' })
+    postJSON('/archived-sessions/router/snapshot', {})
+      .then((d) => setRouterSnap(d))
+      .catch((e) => setRouterErr(String((e && e.message) || e)))
+      .finally(() => setRouterBusy(false))
+  }, [settingsOpen])
 
   // 自动归档设置随面板加载一次（host 侧读取即触发每日检查）。
   // 存储统计刻意不在这里预取：它要 stat 每条日志，只在用户展开面板时才算。
@@ -3159,55 +3151,13 @@ const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starre
               分布在这四页里，一页只显示属于它的工具，所以不存在「一屏九个按钮」。 */}
           {settingsOpen && (
             <section className="dsm-settings-page" aria-label="插件设置">
-            {/* v3.18.2：设置页只保留一级导航。原来这里还有第二层分组导航，点开设置
-                要过两层才够到内容——多余。现在各分区平铺，标题即分区名。 */}
-            {/* v3.18.3：设置页补一条**小导航栏**（与顶部导航同款式但独立），
-                五个分区各一页。注意这不是回到「顶部导航 + 二级导航」那套——
-                顶部仍是会话视图的导航，这里是设置页内部的分页。 */}
-            <div className="dsm-nav dsm-subnav" role="tablist" aria-label="设置分区">
-              <DsmNavGlider active={settingsTab} rootSel=".dsm-subnav" attr="data-dsm-sub" cls="dsm-navglider" />
-              {DSM_SETTINGS_TABS.map((g) => (
-                <button
-                  key={g.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={settingsTab === g.id}
-                  data-dsm-sub={g.id}
-                  className={'dsm-navtab' + (settingsTab === g.id ? ' dsm-navtab-on' : '')}
-                  onClick={() => setSettingsTab(g.id)}
-                >
-                  <span className="dsm-navtab-label">{g.label}</span>
-                </button>
-              ))}
-            </div>
+            {/* v3.20.0：设置页没有内部导航。四个分区直接平铺，用标题区分；
+                每区的内容（按钮 + 自动展开的面板）就排在标题下面。既然面板已经
+                自动展开，按钮留着当手动收起/重载的入口，不再承载「切换分区」。 */}
 
-            {settingsTab === 'appearance' && (
-            <div className="dsm-settings-section">
-                <button type="button" className="archv-btn" aria-expanded={qaStyleOpen} onClick={() => setQaStyleOpen(!qaStyleOpen)}>面板外观</button>
-            </div>
-            )}
 
-            {settingsTab === 'archive' && (
-            <div className="dsm-settings-section">
-                <button type="button" className="archv-btn" aria-expanded={aaOpen} onClick={() => setAaOpen(!aaOpen)}>自动归档</button>
-                <button type="button" className="archv-btn" aria-expanded={wsArchOpen} onClick={() => { const next = !wsArchOpen; setWsArchOpen(next); if (next) loadWsArch() }}>工作区归档</button>
-            </div>
-            )}
 
-            {settingsTab === 'storage' && (
-            <div className="dsm-settings-section">
-                <button type="button" className="archv-btn" aria-expanded={storageOpen} onClick={() => { const next = !storageOpen; setStorageOpen(next); if (next && (!storage || storageDirty.current) && !storageBusy) loadStorage() }}>存储占用</button>
-                <button type="button" className="archv-btn" aria-expanded={openTagMgr} onClick={() => { setOpenTagMgr(!openTagMgr); setRenamingTagId(null) }}>标签管理</button>
-            </div>
-            )}
 
-            {settingsTab === 'host' && (
-            <div className="dsm-settings-section">
-                <button type="button" className="archv-btn" aria-expanded={mcpOpen} onClick={() => { const n = !mcpOpen; setMcpOpen(n); if (!n) return; setMcpBusy(true); getJSON("/archived-sessions/mcp/rows").then((d) => setMcpRows(Array.isArray(d.rows) ? d.rows : [])).catch((e) => setMcpErr(String((e && e.message) || e))).finally(() => setMcpBusy(false)) }}>MCP 服务器</button>
-                <button type="button" className="archv-btn" aria-expanded={skillOpen} onClick={() => { const n = !skillOpen; setSkillOpen(n); if (!n) return; setSkillBusy(true); getJSON("/archived-sessions/skills/list").then((d) => { setSkillData(d); const w = (d.roots || []).filter((r) => r.scope !== "bundled"); setSkillImportRoot((prev) => prev || (w[0] && w[0].path) || "") }).catch((e) => setSkillErr(String((e && e.message) || e))).finally(() => setSkillBusy(false)) }}>Skill 列表</button>
-                <button type="button" className="archv-btn" aria-expanded={routerOpen} onClick={() => { const n = !routerOpen; setRouterOpen(n); if (!n) return; setRouterBusy(true); postJSON("/archived-sessions/router/snapshot", {}).then((d) => setRouterSnap(d)).catch((e) => setRouterErr(String((e && e.message) || e))).finally(() => setRouterBusy(false)) }}>模型路由</button>
-            </div>
-            )}
 
 
           {/* v0.2.2 快捷面板外观 sheet：预设下拉 + 四个滑杆，改动即时生效并
@@ -3216,7 +3166,8 @@ const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starre
               localStorage，writeQaStyle 后 React 不知道要重渲染 → select 显示
               卡在旧值（外观其实已变）。改为受控组件：qaStyleTick state 随每
               次 write 递增，强制重读最新偏好。 */}
-          {settingsOpen && settingsTab === 'appearance' && qaStyleOpen && (() => {
+            <h3 className="dsm-settings-h">外观</h3>
+          {settingsOpen && qaStyleOpen && (() => {
             void qaStyleTick // 依赖标记：tick 变化时本 IIFE 重渲染重读 localStorage
             const qaPrefs = readQaStyle()
             const setPref = (patch) => { writeQaStyle(patch); setQaStyleTick((n) => n + 1) }
@@ -3292,7 +3243,129 @@ const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starre
 
           {/* v0.5.5 MCP 服务器开关 sheet：列出 profile 里的 MCP 行，一键启停。
               改动写 cordis.patch.yml（服务端先落 .bak-mcpui-* 备份），重启 DSH 生效。 */}
-          {settingsOpen && settingsTab === 'host' && mcpOpen && (
+
+            <h3 className="dsm-settings-h">归档</h3>
+          {settingsOpen && aaOpen && (
+            <div className="mv-sheet" aria-label="自动归档设置">
+              <div className="mv-sheet-head">
+                <h3 className="mv-sheet-title">自动归档</h3>
+                <button type="button" className="mv-sheet-close" aria-label="关闭" onClick={() => setAaOpen(false)}>×</button>
+              </div>
+              <div className="mv-field">
+                <label className="mv-field-label" htmlFor="dsm-aa-days">将多久未活跃的会话自动归档</label>
+                <select id="dsm-aa-days" value={aa.settings.inactiveDays} disabled={aaBusy} onChange={(e) => updateAutoArchive({ inactiveDays: Number(e.target.value) })}>
+                  <option value="0">不自动归档</option>
+                  <option value="30">30 天未活跃</option>
+                  <option value="60">60 天未活跃</option>
+                  <option value="90">90 天未活跃</option>
+                </select>
+              </div>
+              <label className="aa-check">
+                <input type="checkbox" checked={aa.settings.skipStarred !== false} disabled={aaBusy} onChange={(e) => updateAutoArchive({ skipStarred: e.target.checked })} />
+                跳过已收藏的会话
+              </label>
+              <div className="mv-foot">
+                <button type="button" className="archv-btn" disabled={aaBusy || !aa.settings.inactiveDays} onClick={runAutoArchive}>{aaBusy ? '检查中…' : '立即检查'}</button>
+              </div>
+              <div className="dtl-note">
+                自动归档只是把会话收进「已归档」，不删除任何数据，随时可恢复。当前正在使用的会话永远不会被自动归档。检查在打开本面板时触发，每天最多一次。
+              </div>
+            </div>
+          )}
+          {settingsOpen && wsArchOpen && (
+            <div className="mv-sheet" aria-label="工作区归档">
+              <div className="mv-sheet-head">
+                <h3 className="mv-sheet-title">工作区归档</h3>
+                <div className="mv-sheet-actions">
+                  {wsArch.keys.length ? (
+                    <button type="button" className="archv-btn" disabled={wsArchBusy} onClick={() => runWsArch('clear', null, '已恢复全部工作区')}>
+                      {wsArchBusy ? '处理中…' : '全部恢复'}
+                    </button>
+                  ) : null}
+                  <button type="button" className="mv-sheet-close" aria-label="关闭" onClick={() => setWsArchOpen(false)}>×</button>
+                </div>
+              </div>
+              {workspaces.length ? (
+                <div className="ws-arch-list">
+                  {workspaces.map((ws) => (
+                    <div className="ws-arch-row" key={String(ws.workspaceId || ws.path)}>
+                      <span className="ws-arch-name" title={String(ws.path || '')}>{String(ws.title || pathTail(ws.path) || ws.path || '（未命名工作区）')}</span>
+                      <button
+                        type="button"
+                        className={'archv-btn' + (ws.archived ? ' archv-go' : '')}
+                        disabled={wsArchBusy}
+                        onClick={() => runWsArch(ws.archived ? 'unarchive' : 'archive', ws.path, ws.archived ? '已恢复该工作区' : '已归档该工作区')}
+                      >
+                        {ws.archived ? '恢复' : '归档'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="archv-empty">当前宿主没有已注册的工作区</div>
+              )}
+              <div className="dtl-note">
+                归档只是把整个工作区从侧栏分组和会话列表里折叠起来，不动会话自身的归档状态，「已归档」视图也不会被塞满；点「恢复」立刻全部回来。同一个工作区目录重新创建时，归档记录保留。
+              </div>
+            </div>
+          )}
+
+            <h3 className="dsm-settings-h">存储与标签</h3>
+          {settingsOpen && storageOpen && (
+            <div className="mv-sheet" aria-label="存储占用">
+              <div className="mv-sheet-head">
+                <h3 className="mv-sheet-title">存储占用</h3>
+                <div className="mv-sheet-actions">
+                  <button type="button" className="archv-btn" disabled={storageBusy} onClick={loadStorage}>{storageBusy ? '统计中…' : '重新统计'}</button>
+                  <button type="button" className="mv-sheet-close" aria-label="关闭" onClick={() => setStorageOpen(false)}>×</button>
+                </div>
+              </div>
+              {storageError ? (
+                <div className="archv-err" role="alert">
+                  <span>{storageError}</span>
+                  <button type="button" className="archv-errretry" onClick={loadStorage}>重试</button>
+                </div>
+              ) : !storage ? (
+                <div className="archv-empty">统计中…</div>
+              ) : storage.sessionCount === 0 ? (
+                <div className="archv-empty">暂无会话，没有可统计的存储占用。</div>
+              ) : (
+                <>
+                  <div className="dsm-storage-sum">
+                    共 {fmtBytes(storage.totalBytes) || '0 B'} · {storage.sessionCount} 个会话{storage.unknownSessions ? ` · ${storage.unknownSessions} 个大小未知` : ''}
+                  </div>
+                  <div className="dsm-storage-list">
+                    {storage.workspaces.map((w) => (
+                      <div className="dsm-storage-row" key={w.key}>
+                        <span className="dsm-storage-name" title={w.path || '未分组'}>{w.title || (w.path ? pathName(w.path) : '未分组')}</span>
+                        <span className="dsm-storage-bar" aria-hidden="true"><span className="dsm-storage-fill" style={{ width: `${Math.round((w.share || 0) * 100)}%` }} /></span>
+                        <span className="dsm-storage-size">{fmtBytes(w.bytes) || '—'}</span>
+                        <span className="dsm-storage-count">{w.sessions} 个</span>
+                      </div>
+                    ))}
+                  </div>
+                  {storage.top.length > 0 && (
+                    <div className="dtl-sec">
+                      <div className="dtl-sec-t">占用最大的会话</div>
+                      <div className="dsm-storage-list">
+                        {storage.top.map((s) => (
+                          <div className="dsm-storage-row" key={s.sessionId}>
+                            <span className="dsm-storage-name" title={s.sessionId}>{s.title || s.sessionId}</span>
+                            <span className="dsm-storage-size">{fmtBytes(s.sizeBytes) || '—'}</span>
+                            <span className="dsm-storage-count">{s.workspaceTitle || (s.workspacePath ? pathName(s.workspacePath) : '未分组')}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <div className="dtl-note">统计的是会话日志文件的磁盘占用（压缩后的实际大小），只读，不修改任何数据。</div>
+                </>
+              )}
+            </div>
+          )}
+
+            <h3 className="dsm-settings-h">宿主集成</h3>
+          {settingsOpen && mcpOpen && (
             <div className="mv-sheet" aria-label="MCP 服务器">
               <div className="mv-sheet-head">
                 <h3 className="mv-sheet-title">MCP 服务器</h3>
@@ -3343,7 +3416,7 @@ const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starre
               并在响应里带回最新 snapshot，所以不用另外 refresh。
               文案要反复强调「不用重启」——这两行旁边的按钮（MCP / Skill）都需要
               重启或等下一个 step，混在一起很容易让人以为这里也要。 */}
-          {settingsOpen && settingsTab === 'host' && routerOpen && (() => {
+          {settingsOpen && routerOpen && (() => {
             const snap = routerSnap || {}
             const llm = snap.llm || {}
             const sub = snap.subagent || {}
@@ -3557,7 +3630,7 @@ const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starre
           {/* v0.6.1 skill 列表 sheet：三态开关写 frontmatter（服务端先落 .bak-skill-* 备份），
               宿主 watch 到文件变化后下一次 agent step 即生效，不需要重启。
               只列 skillRoots() 扫到的目录；包内（node_modules / bundled）标为只读。 */}
-          {settingsOpen && settingsTab === 'host' && skillOpen && (
+          {settingsOpen && skillOpen && (
             <div className="mv-sheet" aria-label="Skill 列表">
               <div className="mv-sheet-head">
                 <h3 className="mv-sheet-title">Skill 列表{skillData ? ` · ${skillData.skills.length}` : ''}</h3>
@@ -3726,7 +3799,7 @@ const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starre
           {/* T4 标签管理 sheet：照自动归档/待移动队列的 mv-sheet 先例。
               每行 = 名字 / 用量 / 重命名（内联输入）/ 并入 select + 确认 / 删除。
               删除确认文案含「只删标签，不会删除会话」红线（logic.tagDeleteConfirm）。 */}
-          {settingsOpen && settingsTab === 'storage' && openTagMgr && (
+          {settingsOpen && openTagMgr && (
             <div className="mv-sheet" aria-label="标签管理">
               <div className="mv-sheet-head">
                 <h3 className="mv-sheet-title">标签管理 · {tagDefs.length}</h3>
@@ -3822,122 +3895,6 @@ const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starre
                   </span>
                 </div>
               ))}
-            </div>
-          )}
-          {settingsOpen && settingsTab === 'archive' && aaOpen && (
-            <div className="mv-sheet" aria-label="自动归档设置">
-              <div className="mv-sheet-head">
-                <h3 className="mv-sheet-title">自动归档</h3>
-                <button type="button" className="mv-sheet-close" aria-label="关闭" onClick={() => setAaOpen(false)}>×</button>
-              </div>
-              <div className="mv-field">
-                <label className="mv-field-label" htmlFor="dsm-aa-days">将多久未活跃的会话自动归档</label>
-                <select id="dsm-aa-days" value={aa.settings.inactiveDays} disabled={aaBusy} onChange={(e) => updateAutoArchive({ inactiveDays: Number(e.target.value) })}>
-                  <option value="0">不自动归档</option>
-                  <option value="30">30 天未活跃</option>
-                  <option value="60">60 天未活跃</option>
-                  <option value="90">90 天未活跃</option>
-                </select>
-              </div>
-              <label className="aa-check">
-                <input type="checkbox" checked={aa.settings.skipStarred !== false} disabled={aaBusy} onChange={(e) => updateAutoArchive({ skipStarred: e.target.checked })} />
-                跳过已收藏的会话
-              </label>
-              <div className="mv-foot">
-                <button type="button" className="archv-btn" disabled={aaBusy || !aa.settings.inactiveDays} onClick={runAutoArchive}>{aaBusy ? '检查中…' : '立即检查'}</button>
-              </div>
-              <div className="dtl-note">
-                自动归档只是把会话收进「已归档」，不删除任何数据，随时可恢复。当前正在使用的会话永远不会被自动归档。检查在打开本面板时触发，每天最多一次。
-              </div>
-            </div>
-          )}
-          {settingsOpen && settingsTab === 'archive' && wsArchOpen && (
-            <div className="mv-sheet" aria-label="工作区归档">
-              <div className="mv-sheet-head">
-                <h3 className="mv-sheet-title">工作区归档</h3>
-                <div className="mv-sheet-actions">
-                  {wsArch.keys.length ? (
-                    <button type="button" className="archv-btn" disabled={wsArchBusy} onClick={() => runWsArch('clear', null, '已恢复全部工作区')}>
-                      {wsArchBusy ? '处理中…' : '全部恢复'}
-                    </button>
-                  ) : null}
-                  <button type="button" className="mv-sheet-close" aria-label="关闭" onClick={() => setWsArchOpen(false)}>×</button>
-                </div>
-              </div>
-              {workspaces.length ? (
-                <div className="ws-arch-list">
-                  {workspaces.map((ws) => (
-                    <div className="ws-arch-row" key={String(ws.workspaceId || ws.path)}>
-                      <span className="ws-arch-name" title={String(ws.path || '')}>{String(ws.title || pathTail(ws.path) || ws.path || '（未命名工作区）')}</span>
-                      <button
-                        type="button"
-                        className={'archv-btn' + (ws.archived ? ' archv-go' : '')}
-                        disabled={wsArchBusy}
-                        onClick={() => runWsArch(ws.archived ? 'unarchive' : 'archive', ws.path, ws.archived ? '已恢复该工作区' : '已归档该工作区')}
-                      >
-                        {ws.archived ? '恢复' : '归档'}
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="archv-empty">当前宿主没有已注册的工作区</div>
-              )}
-              <div className="dtl-note">
-                归档只是把整个工作区从侧栏分组和会话列表里折叠起来，不动会话自身的归档状态，「已归档」视图也不会被塞满；点「恢复」立刻全部回来。同一个工作区目录重新创建时，归档记录保留。
-              </div>
-            </div>
-          )}
-          {settingsOpen && settingsTab === 'storage' && storageOpen && (
-            <div className="mv-sheet" aria-label="存储占用">
-              <div className="mv-sheet-head">
-                <h3 className="mv-sheet-title">存储占用</h3>
-                <div className="mv-sheet-actions">
-                  <button type="button" className="archv-btn" disabled={storageBusy} onClick={loadStorage}>{storageBusy ? '统计中…' : '重新统计'}</button>
-                  <button type="button" className="mv-sheet-close" aria-label="关闭" onClick={() => setStorageOpen(false)}>×</button>
-                </div>
-              </div>
-              {storageError ? (
-                <div className="archv-err" role="alert">
-                  <span>{storageError}</span>
-                  <button type="button" className="archv-errretry" onClick={loadStorage}>重试</button>
-                </div>
-              ) : !storage ? (
-                <div className="archv-empty">统计中…</div>
-              ) : storage.sessionCount === 0 ? (
-                <div className="archv-empty">暂无会话，没有可统计的存储占用。</div>
-              ) : (
-                <>
-                  <div className="dsm-storage-sum">
-                    共 {fmtBytes(storage.totalBytes) || '0 B'} · {storage.sessionCount} 个会话{storage.unknownSessions ? ` · ${storage.unknownSessions} 个大小未知` : ''}
-                  </div>
-                  <div className="dsm-storage-list">
-                    {storage.workspaces.map((w) => (
-                      <div className="dsm-storage-row" key={w.key}>
-                        <span className="dsm-storage-name" title={w.path || '未分组'}>{w.title || (w.path ? pathName(w.path) : '未分组')}</span>
-                        <span className="dsm-storage-bar" aria-hidden="true"><span className="dsm-storage-fill" style={{ width: `${Math.round((w.share || 0) * 100)}%` }} /></span>
-                        <span className="dsm-storage-size">{fmtBytes(w.bytes) || '—'}</span>
-                        <span className="dsm-storage-count">{w.sessions} 个</span>
-                      </div>
-                    ))}
-                  </div>
-                  {storage.top.length > 0 && (
-                    <div className="dtl-sec">
-                      <div className="dtl-sec-t">占用最大的会话</div>
-                      <div className="dsm-storage-list">
-                        {storage.top.map((s) => (
-                          <div className="dsm-storage-row" key={s.sessionId}>
-                            <span className="dsm-storage-name" title={s.sessionId}>{s.title || s.sessionId}</span>
-                            <span className="dsm-storage-size">{fmtBytes(s.sizeBytes) || '—'}</span>
-                            <span className="dsm-storage-count">{s.workspaceTitle || (s.workspacePath ? pathName(s.workspacePath) : '未分组')}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  <div className="dtl-note">统计的是会话日志文件的磁盘占用（压缩后的实际大小），只读，不修改任何数据。</div>
-                </>
-              )}
             </div>
           )}
             </section>
@@ -4761,8 +4718,8 @@ const SIDEBAR_AUG_CSS = `
 .dsm-subnav{margin:0 0 4px}
 /* v3.18.4：分区内不再有「点击展开」按钮，面板直接铺开；占位块只负责留白。 */
 .dsm-panel-open{display:none}
+.dsm-settings-h{margin:0;font-size:12px;font-weight:700;letter-spacing:.02em;color:var(--dsw-alias-label-secondary)}
 .dsm-loadmore{display:flex;justify-content:center;padding:12px 0 4px}
-.dsm-settings-h{margin:0;font-size:12px;font-weight:700;letter-spacing:.02em;
   color:var(--dsw-alias-label-secondary)}
 .dsm-filter-links{flex-wrap:wrap}
 .dsm-storage-bar{flex:0 0 96px;height:6px;border-radius:999px;background:var(--dsw-alias-fill-subtle);overflow:hidden}
