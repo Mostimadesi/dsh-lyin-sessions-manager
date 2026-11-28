@@ -64,6 +64,13 @@ function DsmNavGlider({ active, rootSel = '.dsm-nav', attr = 'data-dsm-nav', cls
 
 // v3.18.3：设置页内部的分页顺序 = 用户从「最常改」到「最少动」的直觉顺序。
 
+const DSM_SETTINGS_TABS = [
+  { id: 'appearance', label: '外观' },
+  { id: 'archive', label: '归档' },
+  { id: 'storage', label: '存储与标签' },
+  { id: 'host', label: '宿主集成' },
+]
+
 const PANEL_PREFS_KEY = 'dsm-panel-prefs-v1'
 function loadPanelPrefs() {
   try { return JSON.parse(localStorage.getItem(PANEL_PREFS_KEY) || '{}') || {} } catch (e) { return {} }
@@ -1689,6 +1696,8 @@ const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starre
   // null = 菜单关闭。用它替代原先 9 个独立的 open 状态做互斥；下面那些
   // qaStyleOpen / mcpOpen … 仍保留，因为要驱动各自的 sheet 内容。
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // v3.21.0：设置页的分区切换（外观 / 归档 / 存储与标签 / 宿主集成）。
+  const [settingsTab, setSettingsTab] = useState('appearance')
   // v3.18.3：设置页内部的分页（外观 / 会话筛选 / 归档 / 存储与标签 / 宿主集成）。
   const [routerOpen, setRouterOpen] = useState(false)
   const [routerTab, setRouterTab] = useState('llm')
@@ -2152,39 +2161,39 @@ const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starre
     }
   }, [moreOpen])
 
-  // v3.20.0：设置页平铺显示，没有分区切换；进入设置就把四区面板全部展开一次。
-  // 用户明确要求「内容已经自动展开了，按钮多余」，所以不再有手动开合入口。
-  const autoOpenedRef = useRef(false)
+  // v3.21.0：切到某个分区就展开该区的面板，内容直接可见，不需要点按钮。
+  const autoOpenedRef = useRef(new Set())
   useEffect(() => {
-    if (!settingsOpen || autoOpenedRef.current) return
-    autoOpenedRef.current = true
-    setQaStyleOpen(true)
-    setAaOpen(true)
-    loadWsArch()
-    setWsArchOpen(true)
-    loadStorage()
-    setStorageOpen(true)
-    setMcpOpen(true); setMcpBusy(true); setMcpErr(''); setMcpNote('')
-    getJSON('/archived-sessions/mcp/rows')
-      .then((d) => setMcpRows(Array.isArray(d.rows) ? d.rows : []))
-      .catch((e) => setMcpErr(String((e && e.message) || e)))
-      .finally(() => setMcpBusy(false))
-    setSkillOpen(true); setSkillBusy(true); setSkillErr(''); setSkillNote('')
-    getJSON('/archived-sessions/skills/list')
-      .then((d) => {
-        setSkillData(d)
-        const w = (d.roots || []).filter((r) => r.scope !== 'bundled')
-        setSkillImportRoot((prev) => prev || (w[0] && w[0].path) || '')
-      })
-      .catch((e) => setSkillErr(String((e && e.message) || e)))
-      .finally(() => setSkillBusy(false))
-    setRouterOpen(true); setRouterBusy(true); setRouterErr(''); setRouterNote(''); setRouterEdit('')
-    setRouterNew({ open: false, id: '', name: '', chain: '' })
-    postJSON('/archived-sessions/router/snapshot', {})
-      .then((d) => setRouterSnap(d))
-      .catch((e) => setRouterErr(String((e && e.message) || e)))
-      .finally(() => setRouterBusy(false))
-  }, [settingsOpen])
+    if (!settingsOpen) return
+    const key = settingsTab
+    if (autoOpenedRef.current.has(key)) return
+    autoOpenedRef.current.add(key)
+    if (key === 'appearance') setQaStyleOpen(true)
+    if (key === 'archive') { setAaOpen(true); loadWsArch(); setWsArchOpen(true) }
+    if (key === 'storage') { loadStorage(); setStorageOpen(true); setOpenTagMgr(true) }
+    if (key === 'host') {
+      setMcpOpen(true); setMcpBusy(true); setMcpErr(''); setMcpNote('')
+      getJSON('/archived-sessions/mcp/rows')
+        .then((d) => setMcpRows(Array.isArray(d.rows) ? d.rows : []))
+        .catch((e) => setMcpErr(String((e && e.message) || e)))
+        .finally(() => setMcpBusy(false))
+      setRouterOpen(true); setRouterBusy(true); setRouterErr(''); setRouterNote(''); setRouterEdit('')
+      setRouterNew({ open: false, id: '', name: '', chain: '' })
+      postJSON('/archived-sessions/router/snapshot', {})
+        .then((d) => setRouterSnap(d))
+        .catch((e) => setRouterErr(String((e && e.message) || e)))
+        .finally(() => setRouterBusy(false))
+      setSkillOpen(true); setSkillBusy(true); setSkillErr(''); setSkillNote('')
+      getJSON('/archived-sessions/skills/list')
+        .then((d) => {
+          setSkillData(d)
+          const w = (d.roots || []).filter((r) => r.scope !== 'bundled')
+          setSkillImportRoot((prev) => prev || (w[0] && w[0].path) || '')
+        })
+        .catch((e) => setSkillErr(String((e && e.message) || e)))
+        .finally(() => setSkillBusy(false))
+    }
+  }, [settingsOpen, settingsTab])
 
   // 自动归档设置随面板加载一次（host 侧读取即触发每日检查）。
   // 存储统计刻意不在这里预取：它要 stat 每条日志，只在用户展开面板时才算。
@@ -3166,7 +3175,26 @@ const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starre
               localStorage，writeQaStyle 后 React 不知道要重渲染 → select 显示
               卡在旧值（外观其实已变）。改为受控组件：qaStyleTick state 随每
               次 write 递增，强制重读最新偏好。 */}
-            <h3 className="dsm-settings-h">外观</h3>
+            {/* v3.21.0：分区导航（外观 / 归档 / 存储与标签 / 宿主集成）。
+                切换分区即展开该区的面板内容，不需要再点按钮。 */}
+            <div className="dsm-nav dsm-subnav" role="tablist" aria-label="设置分区">
+              <DsmNavGlider active={settingsTab} rootSel=".dsm-subnav" attr="data-dsm-sub" cls="dsm-navglider" />
+              {DSM_SETTINGS_TABS.map((g) => (
+                <button
+                  key={g.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={settingsTab === g.id}
+                  data-dsm-sub={g.id}
+                  className={'dsm-navtab' + (settingsTab === g.id ? ' dsm-navtab-on' : '')}
+                  onClick={() => setSettingsTab(g.id)}
+                >
+                  <span className="dsm-navtab-label">{g.label}</span>
+                </button>
+              ))}
+            </div>
+
+          {settingsTab === 'appearance' && (<>
           {settingsOpen && qaStyleOpen && (() => {
             void qaStyleTick // 依赖标记：tick 变化时本 IIFE 重渲染重读 localStorage
             const qaPrefs = readQaStyle()
@@ -3243,8 +3271,9 @@ const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starre
 
           {/* v0.5.5 MCP 服务器开关 sheet：列出 profile 里的 MCP 行，一键启停。
               改动写 cordis.patch.yml（服务端先落 .bak-mcpui-* 备份），重启 DSH 生效。 */}
+          </>)}
 
-            <h3 className="dsm-settings-h">归档</h3>
+          {settingsTab === 'archive' && (<>
           {settingsOpen && aaOpen && (
             <div className="mv-sheet" aria-label="自动归档设置">
               <div className="mv-sheet-head">
@@ -3309,8 +3338,9 @@ const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starre
               </div>
             </div>
           )}
+          </>)}
 
-            <h3 className="dsm-settings-h">存储与标签</h3>
+          {settingsTab === 'storage' && (<>
           {settingsOpen && storageOpen && (
             <div className="mv-sheet" aria-label="存储占用">
               <div className="mv-sheet-head">
@@ -3448,8 +3478,9 @@ const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starre
               <div className="dtl-note">标签是会话的自定义标记：新建、重命名、合并、删除都只改标记本身，不会删除或移动任何会话。单个会话的标签数量与标签总数都有服务端上限，超限时会提示并自动回退本地改动。</div>
             </div>
           )}
+          </>)}
 
-            <h3 className="dsm-settings-h">宿主集成</h3>
+          {settingsTab === 'host' && (<>
           {settingsOpen && mcpOpen && (
             <div className="mv-sheet" aria-label="MCP 服务器">
               <div className="mv-sheet-head">
@@ -3898,6 +3929,7 @@ const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starre
               ))}
             </div>
           )}
+          </>)}
             </section>
           )}
           {!settingsOpen && showSessionList && (
