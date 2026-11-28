@@ -62,6 +62,15 @@ function DsmNavGlider({ active, rootSel = '.dsm-nav', attr = 'data-dsm-nav', cls
   )
 }
 
+// v3.18.3：设置页内部的分页顺序 = 用户从「最常改」到「最少动」的直觉顺序。
+const DSM_SETTINGS_TABS = [
+  { id: 'filters', label: '会话筛选' },
+  { id: 'appearance', label: '外观' },
+  { id: 'archive', label: '归档' },
+  { id: 'storage', label: '存储与标签' },
+  { id: 'host', label: '宿主集成' },
+]
+
 const PANEL_PREFS_KEY = 'dsm-panel-prefs-v1'
 function loadPanelPrefs() {
   try { return JSON.parse(localStorage.getItem(PANEL_PREFS_KEY) || '{}') || {} } catch (e) { return {} }
@@ -1533,7 +1542,11 @@ function SessionPanel({ workspacesSvc }) {
   const initialPrefs = useRef(loadPanelPrefs()).current
   // 注意：'storage' 已从可持久化取值中移除（它不再是视图），旧版残留的
   // filter='storage' 会自动回落到 'all'，避免落到一个已不存在的界面。
-  const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starred', 'review', 'empty', 'trash'].includes(initialPrefs.filter) ? initialPrefs.filter : 'all')
+  // v3.18.3：列表渐进渲染。372 个会话一次全挂 DOM 会让切 tab 明显卡顿（
+  // 每次 filter 变化都要重排整棵卡片树）。先渲染一屏，滚到底再加一屏。
+  const DSM_PAGE_SIZE = 60
+  const [visibleCount, setVisibleCount] = useState(DSM_PAGE_SIZE)
+const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starred', 'review', 'empty', 'trash'].includes(initialPrefs.filter) ? initialPrefs.filter : 'all')
   // 低频分类折叠区：挂载时若选中的就是低频分类（偏好恢复/上次停留）则展开，
   // 保证激活 tab 始终可见；平时由箭头 hover/点按控制。
   const [query, setQuery] = useState('')
@@ -1681,6 +1694,8 @@ function SessionPanel({ workspacesSvc }) {
   // null = 菜单关闭。用它替代原先 9 个独立的 open 状态做互斥；下面那些
   // qaStyleOpen / mcpOpen … 仍保留，因为要驱动各自的 sheet 内容。
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // v3.18.3：设置页内部的分页（外观 / 会话筛选 / 归档 / 存储与标签 / 宿主集成）。
+  const [settingsTab, setSettingsTab] = useState('filters')
   const [routerOpen, setRouterOpen] = useState(false)
   const [routerTab, setRouterTab] = useState('llm')
   const [routerSnap, setRouterSnap] = useState(null)
@@ -2123,6 +2138,8 @@ function SessionPanel({ workspacesSvc }) {
   useEffect(() => {
     try { localStorage.setItem(PANEL_PREFS_KEY, JSON.stringify({ filter, workspaceFilter, sortBy, groupByLineage })) } catch (e) {}
   }, [filter, workspaceFilter, sortBy, groupByLineage])
+  // 换视图/搜索条件时回到第一屏，避免把上一个视图的展开量带过来。
+  useEffect(() => { setVisibleCount(DSM_PAGE_SIZE) }, [filter, query, workspaceFilter, tagFilter, sortBy])
 
   // 自动归档设置随面板加载一次（host 侧读取即触发每日检查）。
   // 存储统计刻意不在这里预取：它要 stat 每条日志，只在用户展开面板时才算。
@@ -3065,6 +3082,26 @@ function SessionPanel({ workspacesSvc }) {
             <section className="dsm-settings-page" aria-label="插件设置">
             {/* v3.18.2：设置页只保留一级导航。原来这里还有第二层分组导航，点开设置
                 要过两层才够到内容——多余。现在各分区平铺，标题即分区名。 */}
+            {/* v3.18.3：设置页补一条**小导航栏**（与顶部导航同款式但独立），
+                五个分区各一页。注意这不是回到「顶部导航 + 二级导航」那套——
+                顶部仍是会话视图的导航，这里是设置页内部的分页。 */}
+            <div className="dsm-nav dsm-subnav" role="tablist" aria-label="设置分区">
+              <DsmNavGlider active={settingsTab} rootSel=".dsm-subnav" attr="data-dsm-sub" cls="dsm-navglider" />
+              {DSM_SETTINGS_TABS.map((g) => (
+                <button
+                  key={g.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={settingsTab === g.id}
+                  data-dsm-sub={g.id}
+                  className={'dsm-navtab' + (settingsTab === g.id ? ' dsm-navtab-on' : '')}
+                  onClick={() => setSettingsTab(g.id)}
+                >
+                  <span className="dsm-navtab-label">{g.label}</span>
+                </button>
+              ))}
+            </div>
+            {settingsTab === 'filters' && (
             <div className="dsm-settings-section">
               <h3 className="dsm-settings-h">会话筛选</h3>
                 <div className="maint-group dsm-filter-links">
@@ -3084,7 +3121,9 @@ function SessionPanel({ workspacesSvc }) {
                   ))}
                 </div>
             </div>
+            )}
 
+            {settingsTab === 'appearance' && (
             <div className="dsm-settings-section">
               <h3 className="dsm-settings-h">外观</h3>
                 <div className="maint-group">
@@ -3093,7 +3132,9 @@ function SessionPanel({ workspacesSvc }) {
                   </button>
                 </div>
             </div>
+            )}
 
+            {settingsTab === 'archive' && (
             <div className="dsm-settings-section">
               <h3 className="dsm-settings-h">归档</h3>
                 <div className="maint-group">
@@ -3116,7 +3157,9 @@ function SessionPanel({ workspacesSvc }) {
                   </button>
                 </div>
             </div>
+            )}
 
+            {settingsTab === 'storage' && (
             <div className="dsm-settings-section">
               <h3 className="dsm-settings-h">存储与标签</h3>
                 <div className="maint-group">
@@ -3133,7 +3176,9 @@ function SessionPanel({ workspacesSvc }) {
                   >标签管理{tagsReady && tagDefs.length ? ` (${tagDefs.length})` : ''}</button>
                 </div>
             </div>
+            )}
 
+            {settingsTab === 'host' && (
             <div className="dsm-settings-section">
               <h3 className="dsm-settings-h">宿主集成</h3>
                 <div className="maint-group">
@@ -3174,6 +3219,7 @@ function SessionPanel({ workspacesSvc }) {
                   }}>模型路由{routerSnap && Array.isArray(routerSnap.llm && routerSnap.llm.routes) ? ` (${routerSnap.llm.routes.length})` : ''}</button>
                 </div>
             </div>
+            )}
 
 
           {/* v0.2.2 快捷面板外观 sheet：预设下拉 + 四个滑杆，改动即时生效并
@@ -4165,7 +4211,7 @@ function SessionPanel({ workspacesSvc }) {
             <div className="archv-empty">{query || workspaceFilter !== 'all' || tagFilter ? '没有匹配的会话。请调整搜索词、标签或工作区筛选。' : filter === 'archived' ? '目前没有归档会话。在“全部”里选中会话点“归档”即可收纳进来。' : filter === 'active' ? '目前没有活动会话。' : filter === 'starred' ? '还没有收藏的会话。点击会话左侧的星标即可收藏。' : filter === 'review' ? '还没有待回看的会话。打开会话行上的「待回看」开关即可收进来。' : filter === 'empty' ? '没有空白会话。新开会话还没产生内容时会归到这里，侧栏会自动隐藏它们。' : '暂无可管理的会话。'}</div>
           ) : !settingsOpen && showSessionList ? (
             <div className="archv-list" role="list">
-              {topList.map((it) => {
+              {topList.slice(0, visibleCount).map((it) => {
                 if (it && it.syntheticRoot) {
                   // 缺失父的分支组头（合成行）：无勾选/星标/菜单/打开，不可导航——
                   // 它代表的来源会话不在当前列表（被筛掉/已归档/已删除），只作归属展示。
@@ -4517,6 +4563,15 @@ function SessionPanel({ workspacesSvc }) {
                   )}
                 </div>
               )}
+              {topList.length > visibleCount && (
+                <div className="dsm-loadmore">
+                  <button
+                    type="button"
+                    className="archv-btn"
+                    onClick={() => setVisibleCount((n) => n + DSM_PAGE_SIZE)}
+                  >再显示 {Math.min(DSM_PAGE_SIZE, topList.length - visibleCount)} 个（还有 {topList.length - visibleCount} 个）</button>
+                </div>
+              )}
             </div>
           ) : null}
         </>
@@ -4699,6 +4754,9 @@ const SIDEBAR_AUG_CSS = `
   padding:12px;border-radius:12px;
   border:1px solid color-mix(in srgb,var(--dsw-alias-border-l1) 78%,transparent);
   background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 42%,transparent)}
+/* v3.18.3：设置页内部的小导航（独立于顶部导航），与顶部同款式。 */
+.dsm-subnav{margin:0 0 4px}
+.dsm-loadmore{display:flex;justify-content:center;padding:12px 0 4px}
 .dsm-settings-h{margin:0;font-size:12px;font-weight:700;letter-spacing:.02em;
   color:var(--dsw-alias-label-secondary)}
 .dsm-filter-links{flex-wrap:wrap}
