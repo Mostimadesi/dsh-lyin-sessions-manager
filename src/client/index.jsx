@@ -90,8 +90,14 @@ const CSS = `
 body[data-ds-dark-theme] .archv{color-scheme:dark}
 /* 兜底：原生弹层行的配色直接写在 option 上（Chromium 按 option 自身的
    background/color 绘制弹层），即使 color-scheme 判定被扩展或环境干扰，
-   暗色下也不会出现白底配浅色文字的不可读组合。 */
-.archv option{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}
+   也不会出现白底配浅色文字的不可读组合。
+   v3.21.1：原先只给暗色写了兜底，亮色主题下 --dsw-alias-bg-layer-2 是白的、
+   而 label-primary 取到浅色时就成了「白底浅字」。这里两种主题都不依赖宿主
+   是否给出成对的背景/前景——显式写死不透明底色与对比度足够的文字色。 */
+.archv option{background:#ffffff;color:#1b1b1b}
+body[data-ds-dark-theme] .archv option{background:#2b2b2e;color:#f1efe8}
+/* select 本体同理：它在亮色主题下也要有可读的底色与文字。 */
+.archv select{background-color:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}
 .archv{--dsm-radius-tag:9px;--dsm-radius-ctl:9px;--dsm-radius-sheet:10px;--dsm-radius-card:12px;display:flex;flex-direction:column;gap:4px;max-width:800px;padding:8px 2px 28px}
 .archv-head{display:flex;align-items:center;gap:10px;margin:0 0 2px}
 .archv-title{font-size:16px;font-weight:650;color:var(--dsw-alias-label-primary);letter-spacing:-0.01em;margin:0}
