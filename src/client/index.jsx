@@ -3109,7 +3109,7 @@ const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starre
             return (
               <div className="dsm-navwrap">
                 <div className="dsm-nav" role="tablist" aria-label="会话与设置">
-                  <DsmNavGlider active={settingsOpen ? "__settings" : activeTop} />
+                  <DsmNavGlider active={settingsOpen ? "__settings" : (filter === "starred" || filter === "review" || filter === "empty" || filter === "trash" ? "__more" : filter)} />
                   {navTabs.map((tab) => (
                     <button
                       key={tab.id}
