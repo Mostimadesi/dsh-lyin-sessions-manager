@@ -94,10 +94,18 @@ body[data-ds-dark-theme] .archv{color-scheme:dark}
    v3.21.1：原先只给暗色写了兜底，亮色主题下 --dsw-alias-bg-layer-2 是白的、
    而 label-primary 取到浅色时就成了「白底浅字」。这里两种主题都不依赖宿主
    是否给出成对的背景/前景——显式写死不透明底色与对比度足够的文字色。 */
-.archv option{background:#ffffff;color:#1b1b1b}
-body[data-ds-dark-theme] .archv option{background:#2b2b2e;color:#f1efe8}
-/* select 本体同理：它在亮色主题下也要有可读的底色与文字。 */
-.archv select{background-color:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}
+/* v3.22.0：控件配色三态。
+   auto（默认）= 按宿主主题自动配对；light / dark = 用户在【外观】里强制指定。
+   这四个变量同时喂给 option、select、input，避免出现「白底浅字」这类错配。 */
+:root{--dsmqa-ctl-bg:#ffffff;--dsmqa-ctl-fg:#1b1b1b;--dsmqa-ctl-border:rgba(120,113,95,.32)}
+body[data-ds-dark-theme]:not([data-dsmqa-ctl]){--dsmqa-ctl-bg:#2b2b2e;--dsmqa-ctl-fg:#f1efe8;--dsmqa-ctl-border:rgba(127,127,127,.34)}
+:root[data-dsmqa-ctl="light"]{--dsmqa-ctl-bg:#ffffff;--dsmqa-ctl-fg:#1b1b1b;--dsmqa-ctl-border:rgba(120,113,95,.32)}
+:root[data-dsmqa-ctl="dark"]{--dsmqa-ctl-bg:#2b2b2e;--dsmqa-ctl-fg:#f1efe8;--dsmqa-ctl-border:rgba(127,127,127,.34)}
+.archv option{background:var(--dsmqa-ctl-bg);color:var(--dsmqa-ctl-fg)}
+.archv select,.archv input{background-color:var(--dsmqa-ctl-bg);color:var(--dsmqa-ctl-fg);border-color:var(--dsmqa-ctl-border)}
+.archv select option{background:var(--dsmqa-ctl-bg);color:var(--dsmqa-ctl-fg)}
+/* 字号与字体：只在用户显式设置时才覆盖，否则跟随宿主。 */
+.archv{font-size:var(--dsmqa-font-size,inherit);font-family:var(--dsmqa-font-family,inherit)}
 .archv{--dsm-radius-tag:9px;--dsm-radius-ctl:9px;--dsm-radius-sheet:10px;--dsm-radius-card:12px;display:flex;flex-direction:column;gap:4px;max-width:800px;padding:8px 2px 28px}
 .archv-head{display:flex;align-items:center;gap:10px;margin:0 0 2px}
 .archv-title{font-size:16px;font-weight:650;color:var(--dsw-alias-label-primary);letter-spacing:-0.01em;margin:0}
@@ -810,8 +818,17 @@ function readQaStyle() {
     out.blur = Number.isFinite(Number(raw.blur)) && raw.blur >= 0 && raw.blur <= 28 ? Number(raw.blur) : null
     out.opacity = Number.isFinite(Number(raw.opacity)) && raw.opacity >= 0.3 && raw.opacity <= 1 ? Number(raw.opacity) : null
     out.width = Number.isFinite(Number(raw.width)) && raw.width >= 480 && raw.width <= 1200 ? Number(raw.width) : null
+    // v3.22.0：控件与排版偏好。controlScheme 决定下拉/输入框的配色来源：
+    // 'auto' 跟随宿主主题自动配对，'light'/'dark' 强制指定。
+    out.controlScheme = ['auto', 'light', 'dark'].includes(raw.controlScheme) ? raw.controlScheme : 'auto'
+    // 字号：面板整体基准字号，12–16px；null = 用宿主默认。
+    out.fontSize = Number.isFinite(Number(raw.fontSize)) && raw.fontSize >= 12 && raw.fontSize <= 16 ? Number(raw.fontSize) : null
+    // 字体：任意 font-family 字符串（用户自填），限长避免脏数据。
+    out.fontFamily = typeof raw.fontFamily === 'string' && raw.fontFamily.trim() ? raw.fontFamily.trim().slice(0, 160) : null
+    // 首屏条数上限：20–200；超出仍分页加载。
+    out.pageLimit = Number.isFinite(Number(raw.pageLimit)) && raw.pageLimit >= 20 && raw.pageLimit <= 200 ? Number(raw.pageLimit) : null
     return out
-  } catch (e) { return { preset: 'dark-glass', radius: null, blur: null, opacity: null, width: null } }
+  } catch (e) { return { preset: 'dark-glass', radius: null, blur: null, opacity: null, width: null, controlScheme: 'auto', fontSize: null, fontFamily: null, pageLimit: null } }
 }
 
 // v3.13.0 胶囊联动：把 netease-lyrics 的三个 localStorage 键读成一份快照。
@@ -832,6 +849,14 @@ function readCapsuleSnapshot() {
   const colors = parse(CAPSULE_COLOR_KEY)
   if (!display && !notice && !colors) return null
   return { display: display || {}, notice: notice || {}, colors: colors || {} }
+}
+
+// v3.22.0：首屏条数（与 qa 偏好同源）。读取失败回落 60。
+function loadPageLimit() {
+  try {
+    const n = Number(readQaStyle().pageLimit)
+    return Number.isFinite(n) && n >= 20 && n <= 200 ? n : 60
+  } catch (e) { return 60 }
 }
 
 function writeQaStyle(next) {
@@ -879,6 +904,15 @@ function applyQaStyle() {
   // 面板本体是否自己上材质，由这个属性开关（见 CSS 里 :root[data-dsmqa-follow="1"]）。
   if (following) root.setAttribute('data-dsmqa-follow', '1')
   else root.removeAttribute('data-dsmqa-follow')
+  // v3.22.0：控件配色 / 字号 / 字体。这些挂在与材质无关的变量上，
+  // 所以切换主题预设不会把它们冲掉。
+  const cs = prefs.controlScheme || 'auto'
+  if (cs === 'auto') root.removeAttribute('data-dsmqa-ctl')
+  else root.setAttribute('data-dsmqa-ctl', cs)
+  if (prefs.fontSize != null) root.style.setProperty('--dsmqa-font-size', prefs.fontSize + 'px')
+  else root.style.removeProperty('--dsmqa-font-size')
+  if (prefs.fontFamily) root.style.setProperty('--dsmqa-font-family', prefs.fontFamily)
+  else root.style.removeProperty('--dsmqa-font-family')
 }
 
 // v0.2.4 问题3修复：状态点颜色是**语义常量**（黄=进行中/琥珀=待处理/红=出错/
@@ -1550,7 +1584,9 @@ function SessionPanel({ workspacesSvc }) {
   // filter='storage' 会自动回落到 'all'，避免落到一个已不存在的界面。
   // v3.18.3：列表渐进渲染。372 个会话一次全挂 DOM 会让切 tab 明显卡顿（
   // 每次 filter 变化都要重排整棵卡片树）。先渲染一屏，滚到底再加一屏。
-  const DSM_PAGE_SIZE = 60
+  // v3.22.0：首屏条数由【外观】里的「默认显示会话数」决定（20–200，默认 60）。
+  // 它同时是「再显示 N 个」的步长；超出部分仍分页加载。
+  const DSM_PAGE_SIZE = loadPageLimit()
   const [visibleCount, setVisibleCount] = useState(DSM_PAGE_SIZE)
   // v3.19.0：顶栏「更多 ▾」下拉（回收站 / 待回看 / 空白）。
   const [moreOpen, setMoreOpen] = useState(false)
@@ -3266,6 +3302,40 @@ const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starre
                   {widthFull ? null : (
                     <button type="button" className="archv-btn" style={{ marginTop: 8 }} onClick={() => setPref({ width: null })}>改回铺满整区</button>
                   )}
+                </div>
+                {/* v3.22.0：控件配色 / 排版 / 条数 —— 与上面的材质滑杆分开，
+                    因为它们作用于表单控件与文本，不改变面板底材。 */}
+                <div className="mv-field">
+                  <label className="mv-field-label" htmlFor="dsm-qa-ctl">控件配色（下拉 / 输入框）</label>
+                  <select id="dsm-qa-ctl" value={qaPrefs.controlScheme || 'auto'} onChange={(e) => setPref({ controlScheme: e.target.value })}>
+                    <option value="auto">跟随宿主主题（自动配对）</option>
+                    <option value="light">固定亮色（白底深字）</option>
+                    <option value="dark">固定暗色（深底浅字）</option>
+                  </select>
+                  <div className="dtl-note">列表项看不清时，先试「跟随宿主主题」；仍不对就固定成与当前主题相反的那个。</div>
+                </div>
+                <div className="mv-field">
+                  <label className="mv-field-label" htmlFor="dsm-qa-fontsize">文字大小（{qaPrefs.fontSize != null ? qaPrefs.fontSize + 'px' : '跟随宿主'}）</label>
+                  <input id="dsm-qa-fontsize" type="range" min={12} max={16} step={1}
+                    value={qaPrefs.fontSize != null ? qaPrefs.fontSize : 13}
+                    onChange={(e) => setPref({ fontSize: Number(e.target.value) })} />
+                  {qaPrefs.fontSize != null
+                    ? <button type="button" className="archv-btn" style={{ marginTop: 8 }} onClick={() => setPref({ fontSize: null })}>恢复跟随宿主字号</button>
+                    : null}
+                </div>
+                <div className="mv-field">
+                  <label className="mv-field-label" htmlFor="dsm-qa-fontfamily">字体（font-family）</label>
+                  <input id="dsm-qa-fontfamily" type="text" placeholder="例如：OzCaramel、思源黑体、system-ui"
+                    value={qaPrefs.fontFamily || ''}
+                    onChange={(e) => setPref({ fontFamily: e.target.value })} />
+                  <div className="dtl-note">填本机已装字体的名称；留空则跟随宿主。填错会自动回落到默认字体，不会白屏。</div>
+                </div>
+                <div className="mv-field">
+                  <label className="mv-field-label" htmlFor="dsm-qa-pagelimit">默认显示会话数（{loadPageLimit()} 条）</label>
+                  <input id="dsm-qa-pagelimit" type="range" min={20} max={200} step={10}
+                    value={loadPageLimit()}
+                    onChange={(e) => setPref({ pageLimit: Number(e.target.value) })} />
+                  <div className="dtl-note">作为首屏上限与「再显示」步长；更少的条数切换更快。</div>
                 </div>
                 <div className="mv-foot">
                   <button type="button" className="archv-btn" onClick={() => setPref({ preset: 'dark-glass', radius: null, blur: null, opacity: null, width: null })}>恢复默认</button>
