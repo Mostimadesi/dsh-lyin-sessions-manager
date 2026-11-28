@@ -3364,6 +3364,91 @@ const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starre
             </div>
           )}
 
+          {/* T4 标签管理 sheet：照自动归档/待移动队列的 mv-sheet 先例。
+              每行 = 名字 / 用量 / 重命名（内联输入）/ 并入 select + 确认 / 删除。
+              删除确认文案含「只删标签，不会删除会话」红线（logic.tagDeleteConfirm）。 */}
+          {settingsOpen && openTagMgr && (
+            <div className="mv-sheet" aria-label="标签管理">
+              <div className="mv-sheet-head">
+                <h3 className="mv-sheet-title">标签管理 · {tagDefs.length}</h3>
+                <button type="button" className="mv-sheet-close" aria-label="关闭" onClick={() => { setOpenTagMgr(false); setRenamingTagId(null) }}>×</button>
+              </div>
+              <div className="mv-field">
+                <label className="mv-field-label" htmlFor="dsm-tag-new">新建标签</label>
+                <div className="mv-browse-row">
+                  <input
+                    id="dsm-tag-new"
+                    type="text"
+                    value={mgrTagName}
+                    disabled={mgrBusy}
+                    maxLength={32}
+                    placeholder="标签名（不能含斜杠，最长 32 字）"
+                    onChange={(e) => setMgrTagName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); createTag() } }}
+                  />
+                  <button type="button" className="archv-btn" disabled={mgrBusy || !mgrTagName.trim()} onClick={createTag}>新建</button>
+                </div>
+              </div>
+              {tagDefs.length === 0 ? (
+                <div className="dtl-note">还没有标签。在上方输入名字即可创建；给会话贴标签也可以在会话卡片的「⋯ → 标签」里进行。</div>
+              ) : (
+                <div>
+                  {tagDefs.map((t) => {
+                    const others = tagDefs.filter((o) => String(o.id) !== String(t.id))
+                    return (
+                      <div key={String(t.id)} className="dsm-tagrow">
+                        {renamingTagId === String(t.id) ? (
+                          <>
+                            <input
+                              className="dsm-tag-input"
+                              type="text"
+                              value={renameTagValue}
+                              disabled={mgrBusy}
+                              maxLength={32}
+                              aria-label={'重命名标签 ' + t.name}
+                              autoFocus
+                              onChange={(e) => setRenameTagValue(e.target.value)}
+                              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitTagRename(t) } if (e.key === 'Escape') setRenamingTagId(null) }}
+                            />
+                            <span className="dsm-tag-acts">
+                              <button type="button" className="archv-btn archv-go" disabled={mgrBusy || !renameTagValue.trim()} onClick={() => commitTagRename(t)}>保存</button>
+                              <button type="button" className="archv-btn" disabled={mgrBusy} onClick={() => setRenamingTagId(null)}>取消</button>
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="dsm-tag-name" title={t.name}>{t.name}</span>
+                            <span className="maint-note">{tagUsage[String(t.id)] || 0} 个会话</span>
+                            <span className="dsm-tag-acts">
+                              <button type="button" className="archv-btn" disabled={mgrBusy || renamingTagId !== null} title="重命名这个标签" onClick={() => { setRenamingTagId(String(t.id)); setRenameTagValue(t.name) }}>重命名</button>
+                              {others.length > 0 && (
+                                <>
+                                  <select
+                                    aria-label={'把标签「' + t.name + '」并入'}
+                                    value={mergeTarget[String(t.id)] || ''}
+                                    disabled={mgrBusy}
+                                    title="把这个标签的所有会话并入另一个标签（并入后本标签删除）"
+                                    onChange={(e) => setMergeTarget((m) => Object.assign({}, m, { [String(t.id)]: e.target.value }))}
+                                  >
+                                    <option value="">并入…</option>
+                                    {others.map((o) => <option key={String(o.id)} value={String(o.id)}>{o.name}</option>)}
+                                  </select>
+                                  <button type="button" className="archv-btn" disabled={mgrBusy || !mergeTarget[String(t.id)]} title={mergeTarget[String(t.id)] ? '确认并入所选标签' : '先在左侧选择并入的目标标签'} onClick={() => mergeTag(t)}>确认</button>
+                                </>
+                              )}
+                              <button type="button" className="archv-btn archv-del" disabled={mgrBusy} title="删除标签（只删标签，不会删除会话）" onClick={() => deleteTag(t)}>删除</button>
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+              <div className="dtl-note">标签是会话的自定义标记：新建、重命名、合并、删除都只改标记本身，不会删除或移动任何会话。单个会话的标签数量与标签总数都有服务端上限，超限时会提示并自动回退本地改动。</div>
+            </div>
+          )}
+
             <h3 className="dsm-settings-h">宿主集成</h3>
           {settingsOpen && mcpOpen && (
             <div className="mv-sheet" aria-label="MCP 服务器">
@@ -3796,90 +3881,6 @@ const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starre
             </div>
           )}
 
-          {/* T4 标签管理 sheet：照自动归档/待移动队列的 mv-sheet 先例。
-              每行 = 名字 / 用量 / 重命名（内联输入）/ 并入 select + 确认 / 删除。
-              删除确认文案含「只删标签，不会删除会话」红线（logic.tagDeleteConfirm）。 */}
-          {settingsOpen && openTagMgr && (
-            <div className="mv-sheet" aria-label="标签管理">
-              <div className="mv-sheet-head">
-                <h3 className="mv-sheet-title">标签管理 · {tagDefs.length}</h3>
-                <button type="button" className="mv-sheet-close" aria-label="关闭" onClick={() => { setOpenTagMgr(false); setRenamingTagId(null) }}>×</button>
-              </div>
-              <div className="mv-field">
-                <label className="mv-field-label" htmlFor="dsm-tag-new">新建标签</label>
-                <div className="mv-browse-row">
-                  <input
-                    id="dsm-tag-new"
-                    type="text"
-                    value={mgrTagName}
-                    disabled={mgrBusy}
-                    maxLength={32}
-                    placeholder="标签名（不能含斜杠，最长 32 字）"
-                    onChange={(e) => setMgrTagName(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); createTag() } }}
-                  />
-                  <button type="button" className="archv-btn" disabled={mgrBusy || !mgrTagName.trim()} onClick={createTag}>新建</button>
-                </div>
-              </div>
-              {tagDefs.length === 0 ? (
-                <div className="dtl-note">还没有标签。在上方输入名字即可创建；给会话贴标签也可以在会话卡片的「⋯ → 标签」里进行。</div>
-              ) : (
-                <div>
-                  {tagDefs.map((t) => {
-                    const others = tagDefs.filter((o) => String(o.id) !== String(t.id))
-                    return (
-                      <div key={String(t.id)} className="dsm-tagrow">
-                        {renamingTagId === String(t.id) ? (
-                          <>
-                            <input
-                              className="dsm-tag-input"
-                              type="text"
-                              value={renameTagValue}
-                              disabled={mgrBusy}
-                              maxLength={32}
-                              aria-label={'重命名标签 ' + t.name}
-                              autoFocus
-                              onChange={(e) => setRenameTagValue(e.target.value)}
-                              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitTagRename(t) } if (e.key === 'Escape') setRenamingTagId(null) }}
-                            />
-                            <span className="dsm-tag-acts">
-                              <button type="button" className="archv-btn archv-go" disabled={mgrBusy || !renameTagValue.trim()} onClick={() => commitTagRename(t)}>保存</button>
-                              <button type="button" className="archv-btn" disabled={mgrBusy} onClick={() => setRenamingTagId(null)}>取消</button>
-                            </span>
-                          </>
-                        ) : (
-                          <>
-                            <span className="dsm-tag-name" title={t.name}>{t.name}</span>
-                            <span className="maint-note">{tagUsage[String(t.id)] || 0} 个会话</span>
-                            <span className="dsm-tag-acts">
-                              <button type="button" className="archv-btn" disabled={mgrBusy || renamingTagId !== null} title="重命名这个标签" onClick={() => { setRenamingTagId(String(t.id)); setRenameTagValue(t.name) }}>重命名</button>
-                              {others.length > 0 && (
-                                <>
-                                  <select
-                                    aria-label={'把标签「' + t.name + '」并入'}
-                                    value={mergeTarget[String(t.id)] || ''}
-                                    disabled={mgrBusy}
-                                    title="把这个标签的所有会话并入另一个标签（并入后本标签删除）"
-                                    onChange={(e) => setMergeTarget((m) => Object.assign({}, m, { [String(t.id)]: e.target.value }))}
-                                  >
-                                    <option value="">并入…</option>
-                                    {others.map((o) => <option key={String(o.id)} value={String(o.id)}>{o.name}</option>)}
-                                  </select>
-                                  <button type="button" className="archv-btn" disabled={mgrBusy || !mergeTarget[String(t.id)]} title={mergeTarget[String(t.id)] ? '确认并入所选标签' : '先在左侧选择并入的目标标签'} onClick={() => mergeTag(t)}>确认</button>
-                                </>
-                              )}
-                              <button type="button" className="archv-btn archv-del" disabled={mgrBusy} title="删除标签（只删标签，不会删除会话）" onClick={() => deleteTag(t)}>删除</button>
-                            </span>
-                          </>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-              <div className="dtl-note">标签是会话的自定义标记：新建、重命名、合并、删除都只改标记本身，不会删除或移动任何会话。单个会话的标签数量与标签总数都有服务端上限，超限时会提示并自动回退本地改动。</div>
-            </div>
-          )}
           {pendingQueue.length > 0 && (
             <div className="mv-sheet" aria-label="待移动队列">
               <div className="mv-sheet-head">
