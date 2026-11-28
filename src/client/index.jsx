@@ -4573,7 +4573,7 @@ const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starre
           </div>
         </div>
       )}
-      {filter === 'trash' && <section className="dsm-trash" aria-label="回收站">
+      {!settingsOpen && filter === 'trash' && <section className="dsm-trash" aria-label="回收站">
         <div className="dsm-trash-h">
           <h3>回收站</h3>
           <span className="dsm-trash-count">{trash.length ? `（${trash.length} 个待清理）` : '（空）'}</span>
