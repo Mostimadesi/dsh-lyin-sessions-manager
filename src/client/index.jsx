@@ -2141,6 +2141,41 @@ const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starre
   // 换视图/搜索条件时回到第一屏，避免把上一个视图的展开量带过来。
   useEffect(() => { setVisibleCount(DSM_PAGE_SIZE) }, [filter, query, workspaceFilter, tagFilter, sortBy])
 
+  // v3.18.4：设置分区切换时自动展开该区的面板（用户要求内容直接平铺）。
+  // 只在该分区首次进入时触发一次；各面板自己仍保留收起按钮。
+  const autoOpenedRef = useRef(new Set())
+  useEffect(() => {
+    if (!settingsOpen) return
+    const key = settingsTab
+    if (autoOpenedRef.current.has(key)) return
+    autoOpenedRef.current.add(key)
+    if (key === 'appearance') setQaStyleOpen(true)
+    if (key === 'archive') { setAaOpen(true); loadWsArch() ; setWsArchOpen(true) }
+    if (key === 'storage') { loadStorage(); setStorageOpen(true) }
+    if (key === 'host') {
+      setMcpOpen(true); setMcpBusy(true); setMcpErr(''); setMcpNote('')
+      getJSON('/archived-sessions/mcp/rows')
+        .then((d) => setMcpRows(Array.isArray(d.rows) ? d.rows : []))
+        .catch((e) => setMcpErr(String((e && e.message) || e)))
+        .finally(() => setMcpBusy(false))
+      setSkillOpen(true); setSkillBusy(true); setSkillErr(''); setSkillNote('')
+      getJSON('/archived-sessions/skills/list')
+        .then((d) => {
+          setSkillData(d)
+          const writable = (d.roots || []).filter((r) => r.scope !== 'bundled')
+          setSkillImportRoot((prev) => prev || (writable[0] && writable[0].path) || '')
+        })
+        .catch((e) => setSkillErr(String((e && e.message) || e)))
+        .finally(() => setSkillBusy(false))
+      setRouterOpen(true); setRouterBusy(true); setRouterErr(''); setRouterNote(''); setRouterEdit('')
+      setRouterNew({ open: false, id: '', name: '', chain: '' })
+      postJSON('/archived-sessions/router/snapshot', {})
+        .then((d) => setRouterSnap(d))
+        .catch((e) => setRouterErr(String((e && e.message) || e)))
+        .finally(() => setRouterBusy(false))
+    }
+  }, [settingsOpen, settingsTab])
+
   // 自动归档设置随面板加载一次（host 侧读取即触发每日检查）。
   // 存储统计刻意不在这里预取：它要 stat 每条日志，只在用户展开面板时才算。
   useEffect(() => {
@@ -3045,11 +3080,17 @@ const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starre
               { id: '__settings', label: '设置', count: null },
               { id: 'trash', label: '回收站', count: trash.length },
             ]
-            const isOn = (id) => (id === '__settings' ? settingsOpen : !settingsOpen && filter === id)
+            // v3.18.4：已收藏 / 待回看 / 空白 是从「设置 → 会话筛选」进入的子视图，
+            // 顶栏没有它们的格子。原先 filter 取这三个值时不匹配任何 tab，五格全不亮，
+            // 看起来像「跳回全部却没选中任何东西」。这里把它们归到「全部」名下，
+            // 并在该 tab 上挂一个当前视图的小标记，避免误读。
+            const SUB_VIEWS = { starred: '已收藏', review: '待回看', empty: '空白' }
+            const activeTop = SUB_VIEWS[filter] ? 'all' : filter
+            const isOn = (id) => (id === '__settings' ? settingsOpen : !settingsOpen && activeTop === id)
             return (
               <div className="dsm-navwrap">
                 <div className="dsm-nav" role="tablist" aria-label="会话与设置">
-                  <DsmNavGlider active={settingsOpen ? '__settings' : filter} />
+                  <DsmNavGlider active={settingsOpen ? '__settings' : activeTop} />
                   {navTabs.map((tab) => (
                     <button
                       key={tab.id}
@@ -3103,7 +3144,6 @@ const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starre
             </div>
             {settingsTab === 'filters' && (
             <div className="dsm-settings-section">
-              <h3 className="dsm-settings-h">会话筛选</h3>
                 <div className="maint-group dsm-filter-links">
                   {/* v3.18.0：这三个视图从顶部导航移到这里（用户要求「其他的移动到设置下」）。
                       点一下＝关设置页 + 切到那个筛选，行为与原先在顶栏时一致。 */}
@@ -3125,99 +3165,25 @@ const [filter, setFilter] = useState(() => ['all', 'active', 'archived', 'starre
 
             {settingsTab === 'appearance' && (
             <div className="dsm-settings-section">
-              <h3 className="dsm-settings-h">外观</h3>
-                <div className="maint-group">
-                  <button type="button" className="archv-btn" aria-expanded={qaStyleOpen} title="快捷面板的主题预设与圆角/模糊/不透明度/宽度" onClick={() => setQaStyleOpen(!qaStyleOpen)}>
-                    面板外观
-                  </button>
-                </div>
+                <div className="dsm-panel-open" />
             </div>
             )}
 
             {settingsTab === 'archive' && (
             <div className="dsm-settings-section">
-              <h3 className="dsm-settings-h">归档</h3>
-                <div className="maint-group">
-                  <button type="button" className={'archv-btn' + (aa.settings.inactiveDays ? ' archv-go' : '')} aria-expanded={aaOpen} onClick={() => setAaOpen(!aaOpen)}>
-                    自动归档{aa.settings.inactiveDays ? `：${aa.settings.inactiveDays} 天未活跃` : '：未启用'}
-                  </button>
-                  {aa.lastRunAt ? <span className="maint-note">上次检查 {fmtDate(aa.lastRunAt)}，归档 {aa.lastArchivedCount} 个</span> : <span className="maint-note">尚未检查</span>}
-                  <button
-                    type="button"
-                    className={'archv-btn' + (wsArch.keys.length ? ' archv-go' : '')}
-                    aria-expanded={wsArchOpen}
-                    title="把整个工作区从侧栏与列表里折叠起来（只做可见性，会话归档状态不变）"
-                    onClick={() => {
-                      const next = !wsArchOpen
-                      setWsArchOpen(next)
-                      if (next) loadWsArch()
-                    }}
-                  >
-                    工作区归档{wsArch.keys.length ? `：${wsArch.keys.length} 个` : '：无'}
-                  </button>
-                </div>
+                <div className="dsm-panel-open" />
             </div>
             )}
 
             {settingsTab === 'storage' && (
             <div className="dsm-settings-section">
-              <h3 className="dsm-settings-h">存储与标签</h3>
-                <div className="maint-group">
-                  <button type="button" className="archv-btn" aria-expanded={storageOpen} onClick={() => { const next = !storageOpen; setStorageOpen(next); if (next && (!storage || storageDirty.current) && !storageBusy) loadStorage() }}>
-                    存储占用{storage ? ` · ${fmtBytes(storage.totalBytes) || '0 B'}` : ''}
-                  </button>
-                  <button
-                    type="button"
-                    className="archv-btn"
-                    aria-expanded={openTagMgr}
-                    disabled={!tagsReady && !openTagMgr}
-                    title={tagsReady ? '新建 / 重命名 / 合并 / 删除标签' : tagsBlockedTitle}
-                    onClick={() => { setOpenTagMgr(!openTagMgr); setRenamingTagId(null) }}
-                  >标签管理{tagsReady && tagDefs.length ? ` (${tagDefs.length})` : ''}</button>
-                </div>
+                <div className="dsm-panel-open" />
             </div>
             )}
 
             {settingsTab === 'host' && (
             <div className="dsm-settings-section">
-              <h3 className="dsm-settings-h">宿主集成</h3>
-                <div className="maint-group">
-                  <button type="button" className="archv-btn" aria-expanded={mcpOpen} title="启用 / 停用本机 profile 里的 MCP 服务器（重启 DSH 后生效）" onClick={() => {
-                    const next = !mcpOpen
-                    setMcpOpen(next)
-                    if (!next) return
-                    setMcpBusy(true); setMcpErr(''); setMcpNote('')
-                    getJSON('/archived-sessions/mcp/rows')
-                      .then((d) => setMcpRows(Array.isArray(d.rows) ? d.rows : []))
-                      .catch((e) => setMcpErr(String((e && e.message) || e)))
-                      .finally(() => setMcpBusy(false))
-                  }}>MCP 服务器</button>
-                  <button type="button" className="archv-btn" aria-expanded={skillOpen} title="启用 / 部分停用 / 停用本机扫描到的 skill，也可导出 zip、导入、删除" onClick={() => {
-                    const next = !skillOpen
-                    setSkillOpen(next)
-                    if (!next) return
-                    setSkillBusy(true); setSkillErr(''); setSkillNote('')
-                    getJSON('/archived-sessions/skills/list')
-                      .then((d) => {
-                        setSkillData(d)
-                        const writable = (d.roots || []).filter((r) => r.scope !== 'bundled')
-                        setSkillImportRoot((prev) => prev || (writable[0] && writable[0].path) || '')
-                      })
-                      .catch((e) => setSkillErr(String((e && e.message) || e)))
-                      .finally(() => setSkillBusy(false))
-                  }}>Skill 列表{skillData && Array.isArray(skillData.skills) ? ` (${skillData.skills.length})` : ''}</button>
-                  <button type="button" className="archv-btn" aria-expanded={routerOpen} title="编辑 llm-router 的候选链与 subagent-router 的子代理候选（改完 5 秒内自生效，不用重启）" onClick={() => {
-                    const next = !routerOpen
-                    setRouterOpen(next)
-                    if (!next) return
-                    setRouterBusy(true); setRouterErr(''); setRouterNote(''); setRouterEdit('')
-                    setRouterNew({ open: false, id: '', name: '', chain: '' })
-                    postJSON('/archived-sessions/router/snapshot', {})
-                      .then((d) => setRouterSnap(d))
-                      .catch((e) => setRouterErr(String((e && e.message) || e)))
-                      .finally(() => setRouterBusy(false))
-                  }}>模型路由{routerSnap && Array.isArray(routerSnap.llm && routerSnap.llm.routes) ? ` (${routerSnap.llm.routes.length})` : ''}</button>
-                </div>
+                <div className="dsm-panel-open" />
             </div>
             )}
 
@@ -4756,6 +4722,8 @@ const SIDEBAR_AUG_CSS = `
   background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 42%,transparent)}
 /* v3.18.3：设置页内部的小导航（独立于顶部导航），与顶部同款式。 */
 .dsm-subnav{margin:0 0 4px}
+/* v3.18.4：分区内不再有「点击展开」按钮，面板直接铺开；占位块只负责留白。 */
+.dsm-panel-open{display:none}
 .dsm-loadmore{display:flex;justify-content:center;padding:12px 0 4px}
 .dsm-settings-h{margin:0;font-size:12px;font-weight:700;letter-spacing:.02em;
   color:var(--dsw-alias-label-secondary)}
